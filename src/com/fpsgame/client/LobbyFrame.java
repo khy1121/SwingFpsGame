@@ -463,16 +463,20 @@ public class LobbyFrame extends JFrame {
         
         // 같은 팀에서 이미 선택된 캐릭터 목록 수집
         java.util.Set<String> disabledCharacters = new java.util.HashSet<>();
+        java.util.Map<String, String> characterOwners = new java.util.HashMap<>();
+        
         for (java.util.Map.Entry<String, Integer> entry : playerTeams.entrySet()) {
             if (entry.getValue() == selectedTeam) {
-                String playerCharId = playerCharacters.get(entry.getKey());
+                String playerName = entry.getKey();
+                String playerCharId = playerCharacters.get(playerName);
                 if (playerCharId != null && !playerCharId.isEmpty()) {
                     disabledCharacters.add(playerCharId);
+                    characterOwners.put(playerCharId, playerName);
                 }
             }
         }
         
-        String characterId = CharacterSelectDialog.showDialog(this, disabledCharacters);
+        String characterId = CharacterSelectDialog.showDialog(this, disabledCharacters, characterOwners);
         if (characterId != null) {
             selectedCharacterId = characterId;
             com.fpsgame.common.CharacterData charData = com.fpsgame.common.CharacterData.getById(characterId);

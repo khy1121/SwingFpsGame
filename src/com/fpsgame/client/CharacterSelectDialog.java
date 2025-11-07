@@ -19,14 +19,16 @@ public class CharacterSelectDialog extends JDialog {
     private String selectedCharacterId;
     private boolean confirmed = false;
     private java.util.Set<String> disabledCharacters; // 비활성화된 캐릭터 (같은 팀에서 이미 선택됨)
+    private java.util.Map<String, String> characterOwners; // 캐릭터ID -> 선택한 플레이어 이름
     
     public CharacterSelectDialog(Frame parent) {
-        this(parent, new java.util.HashSet<>());
+        this(parent, new java.util.HashSet<>(), new java.util.HashMap<>());
     }
     
-    public CharacterSelectDialog(Frame parent, java.util.Set<String> disabledCharacters) {
+    public CharacterSelectDialog(Frame parent, java.util.Set<String> disabledCharacters, java.util.Map<String, String> characterOwners) {
         super(parent, "캐릭터 선택", true);
         this.disabledCharacters = disabledCharacters != null ? disabledCharacters : new java.util.HashSet<>();
+        this.characterOwners = characterOwners != null ? characterOwners : new java.util.HashMap<>();
         initUI();
     }
     
@@ -297,9 +299,12 @@ public class CharacterSelectDialog extends JDialog {
             
             card.addMouseListener(mouseHandler);
         } else {
-            // 비활성화된 캐릭터에는 "(선택됨)" 표시
-            JLabel disabledLabel = new JLabel("(선택됨)");
-            disabledLabel.setFont(new Font("맑은 고딕", Font.BOLD, 14));
+            // 비활성화된 캐릭터에는 선택한 플레이어 이름 표시
+            String ownerName = characterOwners.get(data.id);
+            String labelText = ownerName != null ? ownerName + " 선택함" : "(선택됨)";
+            
+            JLabel disabledLabel = new JLabel(labelText);
+            disabledLabel.setFont(new Font("맑은 고딕", Font.BOLD, 12));
             disabledLabel.setForeground(new Color(255, 100, 100));
             disabledLabel.setHorizontalAlignment(SwingConstants.CENTER);
             card.add(disabledLabel, BorderLayout.NORTH);
@@ -317,11 +322,15 @@ public class CharacterSelectDialog extends JDialog {
     }
     
     public static String showDialog(Frame parent) {
-        return showDialog(parent, new java.util.HashSet<>());
+        return showDialog(parent, new java.util.HashSet<>(), new java.util.HashMap<>());
     }
     
     public static String showDialog(Frame parent, java.util.Set<String> disabledCharacters) {
-        CharacterSelectDialog dialog = new CharacterSelectDialog(parent, disabledCharacters);
+        return showDialog(parent, disabledCharacters, new java.util.HashMap<>());
+    }
+    
+    public static String showDialog(Frame parent, java.util.Set<String> disabledCharacters, java.util.Map<String, String> characterOwners) {
+        CharacterSelectDialog dialog = new CharacterSelectDialog(parent, disabledCharacters, characterOwners);
         dialog.setVisible(true);
         return dialog.isConfirmed() ? dialog.getSelectedCharacterId() : null;
     }

@@ -43,7 +43,7 @@ public class Protocol {
             this.hp = 100;
             this.kills = 0;
             this.deaths = 0;
-            this.characterId = "raven"; // 기본값
+            this.characterId = null; // 기본값 제거: 플레이어가 직접 선택해야 함
         }
     }
 }
