@@ -3,6 +3,10 @@ package com.fpsgame.client;
 import com.fpsgame.common.CharacterData;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.*;
 
@@ -100,6 +104,52 @@ public class CharacterSelectDialog extends JDialog {
         );
     }
     
+    /**
+     * 캐릭터 이미지 로드 (리소스 또는 파일 시스템에서)
+     */
+    private ImageIcon loadCharacterImage(String characterId, int width, int height) {
+        String[] extensions = {".png", ".jpg", ".jpeg"};
+        
+        // 파일명: 첫 글자 대문자 (예: raven -> Raven)
+        String fileName = characterId.substring(0, 1).toUpperCase() + characterId.substring(1).toLowerCase();
+        
+        // 1. 먼저 리소스에서 로드 시도 (src/main/resources/assets/characters/)
+        for (String ext : extensions) {
+            String resourcePath = "/assets/characters/" + fileName + ext;
+            try {
+                java.net.URL imgURL = getClass().getResource(resourcePath);
+                if (imgURL != null) {
+                    BufferedImage img = ImageIO.read(imgURL);
+                    if (img != null) {
+                        Image scaledImg = img.getScaledInstance(width, height, Image.SCALE_SMOOTH);
+                        return new ImageIcon(scaledImg);
+                    }
+                }
+            } catch (IOException e) {
+                // 리소스 로드 실패 시 다음 확장자 시도
+            }
+        }
+        
+        // 2. 리소스에서 못 찾으면 파일 시스템에서 로드 시도 (assets/characters/)
+        for (String ext : extensions) {
+            File imageFile = new File("assets/characters/" + fileName + ext);
+            if (imageFile.exists()) {
+                try {
+                    BufferedImage img = ImageIO.read(imageFile);
+                    if (img != null) {
+                        Image scaledImg = img.getScaledInstance(width, height, Image.SCALE_SMOOTH);
+                        return new ImageIcon(scaledImg);
+                    }
+                } catch (IOException e) {
+                    // 이미지 로드 실패 시 다음 확장자 시도
+                }
+            }
+        }
+        
+        // 이미지가 없으면 null 반환 (대체 UI 표시)
+        return null;
+    }
+    
     private JPanel createCharacterCard(CharacterData data, Color cardBg, Color hoverBg, Font normalFont, Font boldFont) {
         JPanel card = new JPanel(new BorderLayout(8, 8));
         card.setBackground(cardBg);
@@ -108,6 +158,23 @@ public class CharacterSelectDialog extends JDialog {
             new EmptyBorder(12, 12, 12, 12)
         ));
         card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        
+        // 상단: 캐릭터 이미지 또는 대체 아이콘
+        JLabel imageLabel = new JLabel();
+        imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        imageLabel.setPreferredSize(new Dimension(80, 80));
+        
+        ImageIcon characterIcon = loadCharacterImage(data.id, 80, 80);
+        if (characterIcon != null) {
+            imageLabel.setIcon(characterIcon);
+        } else {
+            // 이미지가 없으면 첫 글자를 큰 텍스트로 표시
+            imageLabel.setText(data.name.substring(0, 1).toUpperCase());
+            imageLabel.setFont(new Font("맑은 고딕", Font.BOLD, 48));
+            imageLabel.setForeground(new Color(100, 150, 255));
+        }
+        
+        card.add(imageLabel, BorderLayout.NORTH);
         
         // 캐릭터 정보
         JPanel infoPanel = new JPanel();
