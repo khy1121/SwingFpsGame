@@ -110,6 +110,7 @@ public class LobbyFrame extends JFrame {
     // 팀 로스터 (서버로부터 받아 업데이트)
     private java.util.Map<String, Integer> playerTeams = new java.util.HashMap<>();
     private java.util.Set<String> readyPlayers = new java.util.HashSet<>();
+    private java.util.Map<String, String> playerCharacters = new java.util.HashMap<>(); // 플레이어별 선택한 캐릭터
     
     public LobbyFrame(String playerName) {
         super("FPS 게임");
@@ -460,7 +461,18 @@ public class LobbyFrame extends JFrame {
             return;
         }
         
-        String characterId = CharacterSelectDialog.showDialog(this);
+        // 같은 팀에서 이미 선택된 캐릭터 목록 수집
+        java.util.Set<String> disabledCharacters = new java.util.HashSet<>();
+        for (java.util.Map.Entry<String, Integer> entry : playerTeams.entrySet()) {
+            if (entry.getValue() == selectedTeam) {
+                String playerCharId = playerCharacters.get(entry.getKey());
+                if (playerCharId != null && !playerCharId.isEmpty()) {
+                    disabledCharacters.add(playerCharId);
+                }
+            }
+        }
+        
+        String characterId = CharacterSelectDialog.showDialog(this, disabledCharacters);
         if (characterId != null) {
             selectedCharacterId = characterId;
             com.fpsgame.common.CharacterData charData = com.fpsgame.common.CharacterData.getById(characterId);
@@ -699,22 +711,27 @@ public class LobbyFrame extends JFrame {
     
         private void handleLobbyMessage(String message) {
             if (message.startsWith("TEAM_ROSTER:")) {
-                // 형식: TEAM_ROSTER:player1,0,true;player2,1,false
+                // 형식: TEAM_ROSTER:player1,0,true,raven;player2,1,false,piper
                 String data = message.substring("TEAM_ROSTER:".length());
                 playerTeams.clear();
                 readyPlayers.clear();
+                playerCharacters.clear();
             
                 if (!data.isEmpty()) {
                     String[] players = data.split(";");
                     for (String playerData : players) {
                         String[] parts = playerData.split(",");
-                        if (parts.length == 3) {
+                        if (parts.length >= 3) {
                             String name = parts[0];
                             int team = Integer.parseInt(parts[1]);
                             boolean ready = Boolean.parseBoolean(parts[2]);
+                            String characterId = parts.length >= 4 ? parts[3] : "";
                         
                             playerTeams.put(name, team);
                             if (ready) readyPlayers.add(name);
+                            if (!characterId.isEmpty()) {
+                                playerCharacters.put(name, characterId);
+                            }
                         }
                     }
                 }

@@ -57,7 +57,7 @@ public class GameServer {
         }
     }
 
-    // 팀/레디 상태 전체 브로드캐스트
+    // 팀/레디 상태 전체 브로드캐스트 (캐릭터 정보 포함)
     private void broadcastTeamRoster() {
         StringBuilder sb = new StringBuilder("TEAM_ROSTER:");
         boolean first = true;
@@ -68,7 +68,8 @@ public class GameServer {
             first = false;
             sb.append(ch.playerName)
               .append(',').append(ch.playerInfo.team)
-              .append(',').append(ch.ready);
+              .append(',').append(ch.ready)
+              .append(',').append(ch.playerInfo.characterId != null ? ch.playerInfo.characterId : "");
         }
         String rosterMsg = sb.toString();
         for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {

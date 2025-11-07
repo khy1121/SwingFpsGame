@@ -18,9 +18,15 @@ public class CharacterSelectDialog extends JDialog {
     
     private String selectedCharacterId;
     private boolean confirmed = false;
+    private java.util.Set<String> disabledCharacters; // 비활성화된 캐릭터 (같은 팀에서 이미 선택됨)
     
     public CharacterSelectDialog(Frame parent) {
+        this(parent, new java.util.HashSet<>());
+    }
+    
+    public CharacterSelectDialog(Frame parent, java.util.Set<String> disabledCharacters) {
         super(parent, "캐릭터 선택", true);
+        this.disabledCharacters = disabledCharacters != null ? disabledCharacters : new java.util.HashSet<>();
         initUI();
     }
     
@@ -151,13 +157,23 @@ public class CharacterSelectDialog extends JDialog {
     }
     
     private JPanel createCharacterCard(CharacterData data, Color cardBg, Color hoverBg, Font normalFont, Font boldFont) {
+        // 비활성화 여부 확인
+        boolean isDisabled = disabledCharacters.contains(data.id);
+        
         JPanel card = new JPanel(new BorderLayout(8, 8));
-        card.setBackground(cardBg);
+        
+        // 비활성화된 캐릭터는 어두운 배경
+        Color actualCardBg = isDisabled ? new Color(40, 40, 40) : cardBg;
+        Color actualHoverBg = isDisabled ? new Color(50, 50, 50) : hoverBg;
+        
+        card.setBackground(actualCardBg);
         card.setBorder(new CompoundBorder(
             new LineBorder(new Color(70, 72, 78), 2),
             new EmptyBorder(12, 12, 12, 12)
         ));
-        card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        
+        // 비활성화된 캐릭터는 기본 커서
+        card.setCursor(isDisabled ? Cursor.getDefaultCursor() : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         
         // 상단: 캐릭터 이미지 또는 대체 아이콘
         JLabel imageLabel = new JLabel();
@@ -167,11 +183,15 @@ public class CharacterSelectDialog extends JDialog {
         ImageIcon characterIcon = loadCharacterImage(data.id, 80, 80);
         if (characterIcon != null) {
             imageLabel.setIcon(characterIcon);
+            // 비활성화된 캐릭터는 이미지를 반투명하게
+            if (isDisabled) {
+                imageLabel.setEnabled(false);
+            }
         } else {
             // 이미지가 없으면 첫 글자를 큰 텍스트로 표시
             imageLabel.setText(data.name.substring(0, 1).toUpperCase());
             imageLabel.setFont(new Font("맑은 고딕", Font.BOLD, 48));
-            imageLabel.setForeground(new Color(100, 150, 255));
+            imageLabel.setForeground(isDisabled ? new Color(80, 80, 80) : new Color(100, 150, 255));
         }
         
         card.add(imageLabel, BorderLayout.NORTH);
@@ -226,54 +246,64 @@ public class CharacterSelectDialog extends JDialog {
         card.add(infoPanel, BorderLayout.CENTER);
         card.add(statsPanel, BorderLayout.SOUTH);
         
-        // 마우스 이벤트
-        MouseAdapter mouseHandler = new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                card.setBackground(hoverBg);
-                card.setBorder(new CompoundBorder(
-                    new LineBorder(new Color(100, 150, 255), 2),
-                    new EmptyBorder(12, 12, 12, 12)
-                ));
-            }
-            
-            @Override
-            public void mouseExited(MouseEvent e) {
-                if (!data.id.equals(selectedCharacterId)) {
-                    card.setBackground(cardBg);
+        // 비활성화된 캐릭터에는 마우스 이벤트 없음
+        if (!isDisabled) {
+            // 마우스 이벤트
+            MouseAdapter mouseHandler = new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    card.setBackground(actualHoverBg);
                     card.setBorder(new CompoundBorder(
-                        new LineBorder(new Color(70, 72, 78), 2),
+                        new LineBorder(new Color(100, 150, 255), 2),
                         new EmptyBorder(12, 12, 12, 12)
                     ));
                 }
-            }
-            
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                selectedCharacterId = data.id;
-                // 모든 카드 초기화 (부모가 패널인지 안전 확인)
-                Container parent = card.getParent();
-                if (parent instanceof JPanel) {
-                    for (Component comp : ((JPanel) parent).getComponents()) {
-                        if (comp instanceof JPanel) {
-                            comp.setBackground(cardBg);
-                            ((JPanel) comp).setBorder(new CompoundBorder(
-                                new LineBorder(new Color(70, 72, 78), 2),
-                                new EmptyBorder(12, 12, 12, 12)
-                            ));
-                        }
+                
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    if (!data.id.equals(selectedCharacterId)) {
+                        card.setBackground(actualCardBg);
+                        card.setBorder(new CompoundBorder(
+                            new LineBorder(new Color(70, 72, 78), 2),
+                            new EmptyBorder(12, 12, 12, 12)
+                        ));
                     }
                 }
-                // 선택된 카드 하이라이트
-                card.setBackground(new Color(67, 69, 94));
-                card.setBorder(new CompoundBorder(
-                    new LineBorder(new Color(100, 200, 255), 3),
-                    new EmptyBorder(12, 12, 12, 12)
-                ));
-            }
-        };
-        
-        card.addMouseListener(mouseHandler);
+                
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    selectedCharacterId = data.id;
+                    // 모든 카드 초기화 (부모가 패널인지 안전 확인)
+                    Container parent = card.getParent();
+                    if (parent instanceof JPanel) {
+                        for (Component comp : ((JPanel) parent).getComponents()) {
+                            if (comp instanceof JPanel) {
+                                comp.setBackground(actualCardBg);
+                                ((JPanel) comp).setBorder(new CompoundBorder(
+                                    new LineBorder(new Color(70, 72, 78), 2),
+                                    new EmptyBorder(12, 12, 12, 12)
+                                ));
+                            }
+                        }
+                    }
+                    // 선택된 카드 하이라이트
+                    card.setBackground(new Color(67, 69, 94));
+                    card.setBorder(new CompoundBorder(
+                        new LineBorder(new Color(100, 200, 255), 3),
+                        new EmptyBorder(12, 12, 12, 12)
+                    ));
+                }
+            };
+            
+            card.addMouseListener(mouseHandler);
+        } else {
+            // 비활성화된 캐릭터에는 "(선택됨)" 표시
+            JLabel disabledLabel = new JLabel("(선택됨)");
+            disabledLabel.setFont(new Font("맑은 고딕", Font.BOLD, 14));
+            disabledLabel.setForeground(new Color(255, 100, 100));
+            disabledLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            card.add(disabledLabel, BorderLayout.NORTH);
+        }
         
         return card;
     }
@@ -287,7 +317,11 @@ public class CharacterSelectDialog extends JDialog {
     }
     
     public static String showDialog(Frame parent) {
-        CharacterSelectDialog dialog = new CharacterSelectDialog(parent);
+        return showDialog(parent, new java.util.HashSet<>());
+    }
+    
+    public static String showDialog(Frame parent, java.util.Set<String> disabledCharacters) {
+        CharacterSelectDialog dialog = new CharacterSelectDialog(parent, disabledCharacters);
         dialog.setVisible(true);
         return dialog.isConfirmed() ? dialog.getSelectedCharacterId() : null;
     }
