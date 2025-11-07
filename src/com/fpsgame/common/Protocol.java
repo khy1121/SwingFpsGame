@@ -12,6 +12,7 @@ public class Protocol {
     public static final byte PLAYER_UPDATE = 3;
     public static final byte PLAYER_SHOOT = 4;
     public static final byte GAME_STATE = 5;
+    public static final byte CHARACTER_SELECT = 6;
     
     // 간단한 메시지 클래스
     public static class Message {
@@ -32,6 +33,7 @@ public class Protocol {
         public float angle;
         public int hp;
         public int team; // 0=RED, 1=BLUE
+        public String characterId; // 선택한 캐릭터 ID
         public int kills;
         public int deaths;
         
@@ -41,6 +43,7 @@ public class Protocol {
             this.hp = 100;
             this.kills = 0;
             this.deaths = 0;
+            this.characterId = "raven"; // 기본값
         }
     }
 }

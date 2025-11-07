@@ -19,8 +19,8 @@ public class GameServer {
 
     public GameServer(int port) throws IOException {
         serverSocket = new ServerSocket(port);
-        System.out.println("Server started on port " + port);
-        System.out.println("Waiting for players... (Max: " + GameConstants.MAX_PLAYERS + ")");
+        System.out.println("서버 시작: " + port);
+        System.out.println("최대 플레이어 수: " + GameConstants.MAX_PLAYERS);
     }
 
     public void start() {
@@ -30,7 +30,7 @@ public class GameServer {
 
                 if (clients.size() >= GameConstants.MAX_PLAYERS) {
                     DataOutputStream tmpOut = new DataOutputStream(clientSocket.getOutputStream());
-                    tmpOut.writeUTF("Server is full!");
+                    tmpOut.writeUTF("서버가 가득 찼습니다. 나중에 다시 시도하세요.");
                     tmpOut.flush();
                     clientSocket.close();
                     continue;
@@ -113,7 +113,7 @@ public class GameServer {
                     processMessage(message);
                 }
             } catch (IOException e) {
-                System.out.println("Client disconnected: " + playerName);
+                System.out.println("클라이언트 연결 끊김: " + playerName);
             } finally {
                 cleanup();
             }
@@ -131,8 +131,8 @@ public class GameServer {
                     playerInfo = new Protocol.PlayerInfo(clients.size(), playerName);
                     playerInfo.x = 400; playerInfo.y = 300; playerInfo.hp = GameConstants.MAX_HP;
                     clients.put(playerName, this);
-                    sendMessage("WELCOME:Connected to server as " + playerName);
-                    broadcast("CHAT:" + playerName + " joined the game!", playerName);
+                    sendMessage("WELCOME: 서버에 " + playerName + " 님이 연결되었습니다.");
+                    broadcast("CHAT:" + playerName + " 님이 게임에 참가했습니다!", playerName);
                     // 기존 플레이어 스탯을 새 플레이어에게 전달
                     for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
                         ClientHandler ch = e.getValue();
@@ -142,7 +142,7 @@ public class GameServer {
                     }
                     // 새 플레이어 스탯을 모두에게 전달
                     broadcastStats(playerName, playerInfo);
-                    System.out.println("Player joined: " + playerName + " (Total: " + clients.size() + ")");
+                    System.out.println("플레이어 참가: " + playerName + " (총: " + clients.size() + ")");
                     broadcastTeamRoster();
                     break;
 
@@ -155,15 +155,21 @@ public class GameServer {
                     broadcastTeamRoster();
                     break;
 
+                case "CHARACTER_SELECT":
+                    playerInfo.characterId = data;
+                    broadcast("CHAT:" + playerName + " 님이 " + com.fpsgame.common.CharacterData.getById(data).name + " 캐릭터를 선택했습니다!", null);
+                    broadcastTeamRoster();
+                    break;
+
                 case "READY":
                     ready = true;
-                    broadcast("CHAT:" + playerName + " is ready!", null);
+                    broadcast("CHAT:" + playerName + " 님이 준비 완료했습니다!", null);
                     broadcastTeamRoster();
                     break;
 
                 case "UNREADY":
                     ready = false;
-                    broadcast("CHAT:" + playerName + " un-readied.", null);
+                    broadcast("CHAT:" + playerName + " 님이 준비 해제했습니다.", null);
                     broadcastTeamRoster();
                     break;
 
@@ -178,18 +184,18 @@ public class GameServer {
                         if (!ch.ready) allReady = false;
                     }
                     if (redCount == 0 || blueCount == 0) {
-                        sendMessage("CHAT:Cannot start: each team needs at least one player.");
+                        sendMessage("CHAT:Cannot start: 각 팀은 최소 1명의 플레이어가 필요합니다.");
                         break;
                     }
                     if (Math.abs(redCount - blueCount) > 2) {
-                        sendMessage("CHAT:Cannot start: team size difference > 2 (R=" + redCount + ", B=" + blueCount + ")");
+                        sendMessage("CHAT:팀 인원 차이가 2를 초과합니다 (R=" + redCount + ", B=" + blueCount + ")");
                         break;
                     }
                     if (!allReady) {
-                        sendMessage("CHAT:Cannot start: not all players are ready.");
+                        sendMessage("CHAT:: 모든 플레이어가 준비되지 않았습니다.");
                         break;
                     }
-                    broadcast("CHAT:Game starting...", null);
+                    broadcast("CHAT:게임이 시작됩니다...", null);
                     // 게임 시작 신호
                     for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
                         e.getValue().sendMessage("GAME_START");
@@ -227,7 +233,7 @@ public class GameServer {
                             target.playerInfo.deaths++;
                             broadcastStats(this.playerName, this.playerInfo);
                             broadcastStats(hitPlayer, target.playerInfo);
-                            broadcast("CHAT:" + hitPlayer + " was eliminated by " + playerName + "!", null);
+                            broadcast("CHAT:" + hitPlayer + " 님이 " + playerName + " 님을 처치했습니다!", null);
                         } else {
                             broadcastStats(hitPlayer, target.playerInfo);
                         }
@@ -251,11 +257,11 @@ public class GameServer {
                                 broadcastStats(shooterName, shooter.playerInfo);
                                 broadcastStats(playerName, playerInfo);
                                 shooter.sendMessage("KILL:" + playerName);
-                                broadcast("CHAT:" + playerName + " was eliminated by " + shooterName + "!", null);
+                                broadcast("CHAT:" + shooterName + " 님이 " + playerName + " 님을 처치했습니다!", null);
                             } else {
                                 // 슈터를 모르면 일반 사망 처리만
                                 broadcastStats(playerName, playerInfo);
-                                broadcast("CHAT:" + playerName + " died!", null);
+                                broadcast("CHAT:" + playerName + " 님이 사망했습니다!", null);
                             }
                         } else {
                             broadcastStats(playerName, playerInfo);
@@ -266,7 +272,7 @@ public class GameServer {
                 case "DEATH":
                     playerInfo.hp = 0; playerInfo.deaths++;
                     broadcastStats(playerName, playerInfo);
-                    broadcast("CHAT:" + playerName + " died!", null);
+                    broadcast("CHAT:" + playerName + " 님이 사망했습니다!", null);
                     break;
 
                 case "RESPAWN":
@@ -280,7 +286,7 @@ public class GameServer {
                         broadcastStats(playerName, playerInfo);
                         String posUpdate = "PLAYER:" + playerName + "," + playerInfo.x + "," + playerInfo.y + "," + playerInfo.team + "," + playerInfo.hp;
                         broadcast(posUpdate, playerName);
-                        broadcast("CHAT:" + playerName + " respawned!", null);
+                        broadcast("CHAT:" + playerName + " 님이 리스폰했습니다!", null);
                     }
                     break;
 
@@ -304,7 +310,7 @@ public class GameServer {
                 if (playerName != null) {
                     clients.remove(playerName);
                     broadcast("REMOVE:" + playerName, null);
-                    broadcast("CHAT:" + playerName + " left the game.", null);
+                    broadcast("CHAT:" + playerName + " 님이 게임을 나갔습니다.", null);
                     System.out.println("Player left: " + playerName + " (Total: " + clients.size() + ")");
                     broadcastTeamRoster();
                 }
@@ -326,14 +332,14 @@ public class GameServer {
             
             // Shutdown hook
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                System.out.println("\nShutting down server...");
+                System.out.println("\n서버를 종료합니다...");
                 server.stop();
             }));
             
             server.start();
             
         } catch (IOException e) {
-            System.err.println("Failed to start server: " + e.getMessage());
+            System.err.println("서버 시작 실패: " + e.getMessage());
             e.printStackTrace();
         }
     }

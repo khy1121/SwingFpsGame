@@ -87,6 +87,7 @@ public class LobbyFrame extends JFrame {
     private JButton startButton;
     private JButton redTeamButton;
     private JButton blueTeamButton;
+    private JButton characterSelectButton;  // 캐릭터 선택 버튼 추가
     private JTextArea chatArea;
     private JTextField chatInput;
     
@@ -339,25 +340,32 @@ public class LobbyFrame extends JFrame {
         
         bottomPanel.add(teamsAndChatPanel, BorderLayout.CENTER);
         
-        // 하단 READY 버튼
-        JPanel readyPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 15));
+        // 하단 버튼 패널 (READY, CHARACTER SELECT, START)
+        JPanel readyPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 15));
         readyPanel.setBackground(panelBg);
+        
+        // 캐릭터 선택 버튼
+        characterSelectButton = new FilledButton("캐릭터 선택", new Color(150, 100, 255));
+        characterSelectButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+        characterSelectButton.setPreferredSize(new Dimension(180, 50));
+        characterSelectButton.setEnabled(false);  // 팀 선택 후 활성화
+        characterSelectButton.addActionListener(e -> openCharacterSelect());
         
         readyButton = new FilledButton("READY", new Color(67, 181, 129));
         readyButton.setFont(new Font("맑은 고딕", Font.BOLD, 20));
-        readyButton.setPreferredSize(new Dimension(200, 50));
-        readyButton.setEnabled(false);
+        readyButton.setPreferredSize(new Dimension(180, 50));
+        readyButton.setEnabled(false);  // 캐릭터 선택 후 활성화
         readyButton.addActionListener(e -> toggleReady());
         
         // 별도 START 버튼
         startButton = new FilledButton("START", new Color(244, 67, 54));
         startButton.setFont(new Font("맑은 고딕", Font.BOLD, 20));
-        startButton.setPreferredSize(new Dimension(200, 50));
+        startButton.setPreferredSize(new Dimension(180, 50));
         startButton.setEnabled(false);
         startButton.addActionListener(e -> startGame());
 
+        readyPanel.add(characterSelectButton);
         readyPanel.add(readyButton);
-        readyPanel.add(Box.createHorizontalStrut(20));
         readyPanel.add(startButton);
         bottomPanel.add(readyPanel, BorderLayout.SOUTH);
 
@@ -428,7 +436,7 @@ public class LobbyFrame extends JFrame {
         if (selectedTeam == team) return;
         selectedTeam = team;
         updateTeamButtons();
-        readyButton.setEnabled(true); // 팀 선택 후 레디 버튼 활성화
+        characterSelectButton.setEnabled(true); // 팀 선택 후 캐릭터 선택 버튼 활성화
         
         if (out != null) {
             try {
@@ -440,11 +448,50 @@ public class LobbyFrame extends JFrame {
         }
     }
     
+    // 캐릭터 선택 다이얼로그
+    private String selectedCharacterId = "raven"; // 기본 캐릭터
+    
+    private void openCharacterSelect() {
+        if (selectedTeam == -1) {
+            JOptionPane.showMessageDialog(this, 
+                "팀을 먼저 선택해주세요!", 
+                "알림", 
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        String characterId = CharacterSelectDialog.showDialog(this);
+        if (characterId != null) {
+            selectedCharacterId = characterId;
+            com.fpsgame.common.CharacterData charData = com.fpsgame.common.CharacterData.getById(characterId);
+            appendChat("캐릭터 선택: " + charData.name);
+            readyButton.setEnabled(true); // 캐릭터 선택 후 레디 버튼 활성화
+            
+            // 서버에 캐릭터 선택 전송
+            if (out != null) {
+                try {
+                    out.writeUTF("CHARACTER_SELECT:" + characterId);
+                    out.flush();
+                } catch (IOException ex) {
+                    appendChat("캐릭터 선택 전송 실패");
+                }
+            }
+        }
+    }
+    
     // 레디 토글
     private void toggleReady() {
         if (selectedTeam == -1) {
             JOptionPane.showMessageDialog(this, 
                 "팀을 먼저 선택해주세요!", 
+                "알림", 
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        if (selectedCharacterId == null) {
+            JOptionPane.showMessageDialog(this, 
+                "캐릭터를 먼저 선택해주세요!", 
                 "알림", 
                 JOptionPane.WARNING_MESSAGE);
             return;
