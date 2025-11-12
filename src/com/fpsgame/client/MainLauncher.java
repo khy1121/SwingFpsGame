@@ -90,7 +90,7 @@ public class MainLauncher extends JFrame {
         String playerName = nameField.getText().trim();
         if (playerName.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
-                "Please enter your name!", 
+                "이름을 입력해주세요!", 
                 "Error", 
                 JOptionPane.ERROR_MESSAGE);
             return;

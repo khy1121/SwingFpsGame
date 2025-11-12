@@ -826,8 +826,9 @@ public class LobbyFrame extends JFrame {
         lobbyListening = false;
         if (lobbyThread != null) lobbyThread.interrupt();
         appendChat("게임을 시작합니다...");
+        appendChat("선택된 캐릭터: " + selectedCharacterId);
         SwingUtilities.invokeLater(() -> {
-            GamePanel gamePanel = new GamePanel(playerName, selectedTeam, socket, out, in);
+            GamePanel gamePanel = new GamePanel(playerName, selectedTeam, socket, out, in, selectedCharacterId);
             gamePanel.setVisible(true);
             dispose();
         });

@@ -1,5 +1,7 @@
 package com.fpsgame.client;
 
+import com.fpsgame.client.effects.*;
+import com.fpsgame.common.Ability;
 import com.fpsgame.common.CharacterData;
 import com.fpsgame.common.GameConstants;
 import java.awt.*;
@@ -32,6 +34,50 @@ public class GamePanel extends JFrame implements KeyListener {
     private String selectedCharacter = "raven"; // 기본값
     private CharacterData currentCharacterData;
     
+    // 스킬 시스템
+    private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
+    private long lastBasicAttackTime = 0;
+
+    // 스킬 이펙트 (네트워크 포함)
+    private static class ActiveEffect {
+        String abilityId;
+        String type; // BASIC, TACTICAL, ULTIMATE
+        float duration; // 총 지속시간(초)
+        float remaining; // 남은 시간(초)
+        Color color;
+
+        ActiveEffect(String abilityId, String type, float duration) {
+            this.abilityId = abilityId;
+            this.type = type;
+            this.duration = Math.max(0.1f, duration);
+            this.remaining = this.duration;
+            this.color = colorForType(type);
+        }
+
+        static Color colorForType(String type) {
+            if ("BASIC".equalsIgnoreCase(type)) return new Color(100, 200, 100);
+            if ("ULTIMATE".equalsIgnoreCase(type)) return new Color(255, 100, 100);
+            return new Color(100, 150, 255); // TACTICAL default
+        }
+    }
+
+    // 다른 플레이어 이펙트, 내 이펙트
+    private final Map<String, java.util.List<ActiveEffect>> effectsByPlayer = new HashMap<>();
+    private final java.util.List<ActiveEffect> myEffects = new ArrayList<>();
+    // Structured skill effects
+    private final SkillEffectManager skillEffects = new SkillEffectManager();
+
+    // Raven 전용 런타임 상태(첫 캐릭터 구현 시작점)
+    private float ravenDashRemaining = 0f;
+    private float ravenOverchargeRemaining = 0f;
+    private float missileSpeedMultiplier = 1f; // 과충전 시 투사체 속도 상승
+    // Piper 전용 런타임 상태
+    private float piperMarkRemaining = 0f;      // 전술 스킬: 적 표시 (시야 확장)
+    private float piperThermalRemaining = 0f;   // 궁극기: 열감지 (전체 위치 표시)
+    // 팀 공유 (같은 팀 Piper가 사용 시 우리도 혜택)
+    private float teamMarkRemaining = 0f;
+    private float teamThermalRemaining = 0f;
+    
     // 다른 플레이어들
     private Map<String, PlayerData> players = new HashMap<>();
     
@@ -40,6 +86,54 @@ public class GamePanel extends JFrame implements KeyListener {
     
     // 게임 패널
     private GameCanvas canvas;
+    
+    // 마우스 위치 (조준선용)
+    private int mouseX = 400;
+    private int mouseY = 300;
+    
+    // 미니맵 표시 여부
+    private boolean showMinimap = true;
+    
+    // 시야 범위 (화면 크기 기반 - 화면에 보이는 범위)
+    // 대각선 거리의 절반을 시야로 사용 (화면 중앙 기준)
+    private static final int VISION_RANGE = (int)(Math.sqrt(
+        GameConstants.GAME_WIDTH * GameConstants.GAME_WIDTH + 
+        GameConstants.GAME_HEIGHT * GameConstants.GAME_HEIGHT) / 2);
+    // Piper 마킹 시 시야 배율 (기본보다 넓지만 전체는 아님)
+    private static final float PIPER_MARK_RANGE_FACTOR = 1.7f;
+    private static final int PIPER_THERMAL_DOT_SIZE = 10; // 열감지 시 점 크기 증가
+    
+    // 맵 시스템
+    private java.awt.image.BufferedImage mapImage; // 맵 배경 이미지
+    private int mapWidth = 3200;    // 맵 전체 크기 (넓은 맵, 화면의 4배)
+    private int mapHeight = 2400;   // 화면의 4배
+    private int cameraX = 0;        // 카메라 위치 (플레이어 중심)
+    private int cameraY = 0;
+    private String currentMapName = "map"; // 기본 맵 (map.png 사용)
+    // 타일 그리드
+    private static final int TILE_SIZE = 32;
+    private boolean[][] walkableGrid; // true = 이동 가능
+    private int gridCols, gridRows;
+    private Rectangle redSpawnZone, blueSpawnZone; // 팀 스폰 구역
+    // 스폰 타일 원본 목록 (랜덤 스폰을 타일 단위로 정확히 하도록 유지)
+    private java.util.List<int[]> redSpawnTiles = new ArrayList<>();
+    private java.util.List<int[]> blueSpawnTiles = new ArrayList<>();
+    
+    // 장애물 시스템
+    private java.util.List<Rectangle> obstacles = new ArrayList<>();
+    // 디버그 토글
+    private boolean debugObstacles = true; // 기본 표시, F3로 토글
+
+    // 맵 편집 모드 (타일 walkable 페인팅)
+    private boolean editMode = false; // F4 토글
+    private int hoverCol = -1, hoverRow = -1; // 마우스 오버 타일
+    // 드래그 페인트 상태: -1=없음, 0=unwalkable로 칠하기, 1=walkable로 칠하기
+    private int paintState = -1;
+    // 편집 페인트 모드: 0=이동 가능 칠하기, 1=이동 불가(장애물) 칠하기, 2=RED 스폰, 3=BLUE 스폰
+    private int editPaintMode = 0;
+    // 맵 순환 목록 및 인덱스 (F6)
+    private java.util.List<String> mapCycle = new ArrayList<>();
+    private int mapIndex = 0;
     
     // 채팅 UI
     private JTextArea chatArea;
@@ -101,6 +195,55 @@ public class GamePanel extends JFrame implements KeyListener {
             setBackground(new Color(20, 25, 35));
             setFocusable(true);
             addKeyListener(GamePanel.this);
+            
+            // 마우스 클릭으로 기본 공격 (마우스 방향으로 발사)
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    // 편집 모드: 타일 페인팅
+                    if (editMode) {
+                        int mapX = e.getX() + cameraX;
+                        int mapY = e.getY() + cameraY;
+                        startPaintAt(mapX, mapY);
+                        return;
+                    }
+                    // 게임 모드: 좌클릭 공격
+                    if (e.getButton() == MouseEvent.BUTTON1) {
+                        int targetMapX = e.getX() + cameraX;
+                        int targetMapY = e.getY() + cameraY;
+                        useBasicAttack(targetMapX, targetMapY);
+                    }
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    if (editMode) {
+                        paintState = -1;
+                    }
+                }
+            });
+            
+            // 마우스 이동 추적 (조준선용 - 화면 좌표 그대로 사용)
+            addMouseMotionListener(new MouseMotionAdapter() {
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    mouseX = e.getX();
+                    mouseY = e.getY();
+                    if (editMode) updateHoverTile(mouseX + cameraX, mouseY + cameraY);
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    mouseX = e.getX();
+                    mouseY = e.getY();
+                    if (editMode) {
+                        int mapX = mouseX + cameraX;
+                        int mapY = mouseY + cameraY;
+                        updateHoverTile(mapX, mapY);
+                        continuePaintAt(mapX, mapY);
+                    }
+                }
+            });
         }
         
         @Override
@@ -109,51 +252,206 @@ public class GamePanel extends JFrame implements KeyListener {
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             
-            // 그리드 배경
-            drawGrid(g2d);
-            
-            // 다른 플레이어들 그리기
-            for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
-                PlayerData p = entry.getValue();
-                Color playerColor = p.team == GameConstants.TEAM_RED ? 
-                    new Color(244, 67, 54) : new Color(33, 150, 243);
-                
-                g2d.setColor(playerColor);
-                g2d.fillOval(p.x - 20, p.y - 20, 40, 40);
-                
-                // 이름 표시
-                g2d.setColor(Color.WHITE);
-                g2d.setFont(new Font("Arial", Font.BOLD, 12));
-                FontMetrics fm = g2d.getFontMetrics();
-                String name = entry.getKey();
-                int nameWidth = fm.stringWidth(name);
-                g2d.drawString(name, p.x - nameWidth / 2, p.y - 25);
-                
-                // HP 바
-                drawHealthBar(g2d, p.x, p.y + 25, p.hp);
+            // 1. 맵 배경 그리기 (카메라 오프셋 적용)
+            if (mapImage != null) {
+                g2d.drawImage(mapImage, -cameraX, -cameraY, mapWidth, mapHeight, null);
+            } else {
+                // 폴백: 그리드
+                drawGrid(g2d);
             }
             
-            // 로컬 플레이어 그리기
+            // 2. 장애물 디버그 표시 (개발용 - 위치 확인)
+            drawObstacles(g2d);
+
+            // 2.5. 편집 모드 타일 오버레이
+            if (editMode) {
+                drawEditorOverlay(g2d);
+            }
+            
+            // 3. 다른 플레이어들 그리기 (화면 좌표로 변환)
+            for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
+                PlayerData p = entry.getValue();
+                
+                // 맵 좌표를 화면 좌표로 변환
+                int screenX = p.x - cameraX;
+                int screenY = p.y - cameraY;
+                
+                // 화면 내에 있는 경우에만 그리기 (최적화)
+                if (isOnScreen(screenX, screenY)) {
+                    Color playerColor = p.team == GameConstants.TEAM_RED ? 
+                        new Color(244, 67, 54) : new Color(33, 150, 243);
+                    
+                    g2d.setColor(playerColor);
+                    g2d.fillOval(screenX - 20, screenY - 20, 40, 40);
+
+                    // 해당 플레이어 주위 이펙트 (구버전)
+                    drawEffectsFor(g2d, entry.getKey(), screenX, screenY);
+                    // 구조화된 SkillEffect 렌더링 (원격 플레이어)
+                    skillEffects.drawForPlayer(entry.getKey(), g2d, screenX, screenY);
+                    
+                    // 이름 표시
+                    g2d.setColor(Color.WHITE);
+                    g2d.setFont(new Font("Arial", Font.BOLD, 12));
+                    FontMetrics fm = g2d.getFontMetrics();
+                    String name = entry.getKey();
+                    int nameWidth = fm.stringWidth(name);
+                    g2d.drawString(name, screenX - nameWidth / 2, screenY - 25);
+                    
+                    // HP 바
+                    drawHealthBar(g2d, screenX, screenY + 25, p.hp);
+                }
+            }
+            
+            // 4. 로컬 플레이어 그리기 (화면 좌표)
+            int myScreenX = playerX - cameraX;
+            int myScreenY = playerY - cameraY;
+            
             Color myColor = team == GameConstants.TEAM_RED ? 
                 new Color(255, 100, 100) : new Color(100, 150, 255);
             g2d.setColor(myColor);
-            g2d.fillOval(playerX - 20, playerY - 20, 40, 40);
+            g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+
+            // 내 이펙트 (구버전)
+            drawMyEffects(g2d);
+            // 구조화된 SkillEffect (클래스 기반) 렌더링
+            skillEffects.drawSelf(g2d, myScreenX, myScreenY);
             
             // 내 이름
             g2d.setColor(Color.YELLOW);
             g2d.setFont(new Font("Arial", Font.BOLD, 12));
             FontMetrics fm = g2d.getFontMetrics();
             int nameWidth = fm.stringWidth(playerName + " (You)");
-            g2d.drawString(playerName + " (You)", playerX - nameWidth / 2, playerY - 25);
+            g2d.drawString(playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
             
-            // 미사일 그리기
+            // 조준선 그리기 (화면 좌표 기준)
+            drawAimLine(g2d);
+            
+            // 5. 미사일 그리기 (화면 좌표로 변환)
             g2d.setColor(Color.YELLOW);
             for (Missile m : missiles) {
-                g2d.fillOval(m.x - 4, m.y - 4, 8, 8);
+                int mScreenX = m.x - cameraX;
+                int mScreenY = m.y - cameraY;
+                if (isOnScreen(mScreenX, mScreenY)) {
+                    g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
+                }
+            }
+            
+            // 미니맵 그리기 (우측 상단)
+            if (showMinimap) {
+                drawMinimap(g2d);
             }
             
             // HUD
             drawHUD(g2d);
+        }
+        
+        /**
+         * 화면 내에 있는지 체크 (최적화용)
+         */
+        private boolean isOnScreen(int screenX, int screenY) {
+            return screenX >= -50 && screenX <= GameConstants.GAME_WIDTH + 50 &&
+                   screenY >= -50 && screenY <= GameConstants.GAME_HEIGHT + 50;
+        }
+        
+        /**
+         * 조준선 그리기: 캐릭터 중심에서 마우스 방향으로 (화면 좌표 기준)
+         */
+        private void drawAimLine(Graphics2D g2d) {
+            int myScreenX = playerX - cameraX;
+            int myScreenY = playerY - cameraY;
+            
+            int vx = mouseX - myScreenX;
+            int vy = mouseY - myScreenY;
+            if (vx == 0 && vy == 0) return; // 마우스가 캐릭터 위치와 같으면 표시 안함
+            
+            double len = Math.sqrt(vx*vx + vy*vy);
+            double nx = vx / len;
+            double ny = vy / len;
+            
+            // 조준선 길이 (짧게 조정)
+            int lineLength = 50;
+            int endX = myScreenX + (int)(nx * lineLength);
+            int endY = myScreenY + (int)(ny * lineLength);
+            
+            // 반투명 빨간색 선
+            g2d.setColor(new Color(255, 0, 0, 100));
+            Stroke oldStroke = g2d.getStroke();
+            g2d.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                                          1f, new float[]{10f, 5f}, 0f)); // 점선
+            g2d.drawLine(myScreenX, myScreenY, endX, endY);
+            g2d.setStroke(oldStroke);
+            
+            // 마우스 위치에 작은 크로스헤어
+            g2d.setColor(new Color(255, 255, 0, 150));
+            g2d.drawOval(mouseX - 4, mouseY - 4, 8, 8);
+            g2d.drawLine(mouseX - 6, mouseY, mouseX + 6, mouseY);
+            g2d.drawLine(mouseX, mouseY - 6, mouseX, mouseY + 6);
+        }
+
+        private void drawMyEffects(Graphics2D g2d) {
+            if (myEffects.isEmpty()) return;
+            int myScreenX = playerX - cameraX;
+            int myScreenY = playerY - cameraY;
+            
+            for (ActiveEffect ef : myEffects) {
+                float progress = 1f - (ef.remaining / ef.duration);
+                int radius = 28 + (int)(Math.sin(progress * 6.28318) * 4);
+                int alpha = (int)(160 * (ef.remaining / ef.duration));
+                alpha = Math.max(40, Math.min(200, alpha));
+                g2d.setColor(new Color(ef.color.getRed(), ef.color.getGreen(), ef.color.getBlue(), alpha));
+                Stroke old = g2d.getStroke();
+                g2d.setStroke(new BasicStroke(3f));
+                g2d.drawOval(myScreenX - radius, myScreenY - radius, radius * 2, radius * 2);
+                g2d.setStroke(old);
+
+                // Piper 전용 화려한 효과 강화
+                if ("piper_mark".equalsIgnoreCase(ef.abilityId)) {
+                    // 부드러운 시안 파동 링 두 겹
+                    g2d.setColor(new Color(100, 220, 255, 90));
+                    g2d.drawOval(myScreenX - radius - 6, myScreenY - radius - 6, (radius + 6) * 2, (radius + 6) * 2);
+                    g2d.setColor(new Color(80, 200, 255, 60));
+                    g2d.drawOval(myScreenX - radius - 12, myScreenY - radius - 12, (radius + 12) * 2, (radius + 12) * 2);
+                } else if ("piper_thermal".equalsIgnoreCase(ef.abilityId)) {
+                    // 주황색 글로우와 회전 아크
+                    double t = (ef.duration - ef.remaining);
+                    int glowR = radius + 8;
+                    g2d.setColor(new Color(255, 160, 40, 110));
+                    g2d.setStroke(new BasicStroke(4f));
+                    g2d.drawOval(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2);
+                    // 회전 아크
+                    g2d.setColor(new Color(255, 200, 80, 160));
+                    int arcStart = (int)((t * 180) % 360);
+                    ((Graphics2D)g2d).setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2d.drawArc(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2, arcStart, 60);
+                }
+            }
+        }
+
+        private void drawEffectsFor(Graphics2D g2d, String player, int x, int y) {
+            java.util.List<ActiveEffect> list = effectsByPlayer.get(player);
+            if (list == null || list.isEmpty()) return;
+            for (ActiveEffect ef : list) {
+                float progress = 1f - (ef.remaining / ef.duration);
+                int radius = 28 + (int)(Math.sin(progress * 6.28318) * 4);
+                int alpha = (int)(160 * (ef.remaining / ef.duration));
+                alpha = Math.max(40, Math.min(200, alpha));
+                g2d.setColor(new Color(ef.color.getRed(), ef.color.getGreen(), ef.color.getBlue(), alpha));
+                Stroke old = g2d.getStroke();
+                g2d.setStroke(new BasicStroke(3f));
+                g2d.drawOval(x - radius, y - radius, radius * 2, radius * 2);
+                g2d.setStroke(old);
+
+                // 원격 Piper 특수 이펙트
+                if ("piper_mark".equalsIgnoreCase(ef.abilityId)) {
+                    g2d.setColor(new Color(100, 220, 255, 80));
+                    g2d.drawOval(x - radius - 6, y - radius - 6, (radius + 6) * 2, (radius + 6) * 2);
+                } else if ("piper_thermal".equalsIgnoreCase(ef.abilityId)) {
+                    int glowR = radius + 8;
+                    g2d.setColor(new Color(255, 160, 40, 110));
+                    g2d.setStroke(new BasicStroke(4f));
+                    g2d.drawOval(x - glowR, y - glowR, glowR * 2, glowR * 2);
+                }
+            }
         }
         
         private void drawGrid(Graphics2D g) {
@@ -163,6 +461,23 @@ public class GamePanel extends JFrame implements KeyListener {
             }
             for (int y = 0; y < getHeight(); y += 50) {
                 g.drawLine(0, y, getWidth(), y);
+            }
+        }
+        
+        /**
+         * 장애물 디버그 표시 (개발용)
+         */
+        private void drawObstacles(Graphics2D g2d) {
+            if (!debugObstacles) return;
+            g2d.setColor(new Color(255, 0, 0, 100)); // 반투명 빨간색
+            for (Rectangle obs : obstacles) {
+                // 맵 좌표를 화면 좌표로 변환
+                int screenX = obs.x - cameraX;
+                int screenY = obs.y - cameraY;
+                g2d.fillRect(screenX, screenY, obs.width, obs.height);
+                g2d.setColor(new Color(255, 255, 0, 150));
+                g2d.drawRect(screenX, screenY, obs.width, obs.height);
+                g2d.setColor(new Color(255, 0, 0, 100));
             }
         }
         
@@ -176,6 +491,103 @@ public class GamePanel extends JFrame implements KeyListener {
             g.setColor(Color.GREEN);
             int currentWidth = (int) (barWidth * (hp / 100.0));
             g.fillRect(x - barWidth / 2, y, currentWidth, barHeight);
+        }
+        
+        private void drawMinimap(Graphics2D g2d) {
+            // 미니맵 크기 및 위치 설정
+            int minimapWidth = 200;
+            int minimapHeight = 150;
+            int minimapX = getWidth() - minimapWidth - 20; // 우측 상단 20px 여백
+            int minimapY = 20;
+
+            // 실제 맵 크기 사용
+            float scaleX = (float) minimapWidth / GamePanel.this.mapWidth;
+            float scaleY = (float) minimapHeight / GamePanel.this.mapHeight;
+
+            // 배경 또는 맵 이미지 그리기
+            if (mapImage != null) {
+                // 맵 이미지를 축소하여 배경으로 렌더링
+                g2d.drawImage(mapImage, minimapX, minimapY, minimapWidth, minimapHeight, null);
+            } else {
+                // 폴백: 어두운 배경 + 장애물 간단 렌더링
+                g2d.setColor(new Color(20, 20, 30, 200));
+                g2d.fillRect(minimapX, minimapY, minimapWidth, minimapHeight);
+                if (obstacles != null && !obstacles.isEmpty()) {
+                    g2d.setColor(new Color(200, 60, 60, 180));
+                    for (Rectangle obs : obstacles) {
+                        int ox = minimapX + Math.round(obs.x * scaleX);
+                        int oy = minimapY + Math.round(obs.y * scaleY);
+                        int ow = Math.max(1, Math.round(obs.width * scaleX));
+                        int oh = Math.max(1, Math.round(obs.height * scaleY));
+                        g2d.fillRect(ox, oy, ow, oh);
+                    }
+                }
+            }
+
+            // 테두리
+            g2d.setColor(Color.WHITE);
+            g2d.drawRect(minimapX, minimapY, minimapWidth, minimapHeight);
+
+            // 현재 화면(카메라) 뷰포트 표시
+            int viewX = minimapX + Math.round(cameraX * scaleX);
+            int viewY = minimapY + Math.round(cameraY * scaleY);
+            int viewW = Math.max(1, Math.round(GameConstants.GAME_WIDTH * scaleX));
+            int viewH = Math.max(1, Math.round(GameConstants.GAME_HEIGHT * scaleY));
+            g2d.setColor(new Color(255, 255, 255, 120));
+            g2d.drawRect(viewX, viewY, viewW, viewH);
+
+            // 내 위치를 미니맵에 표시
+            int myMinimapX = minimapX + (int)(playerX * scaleX);
+            int myMinimapY = minimapY + (int)(playerY * scaleY);
+
+            // 내 캐릭터 (노란색, 조금 큰 점)
+            g2d.setColor(Color.YELLOW);
+            g2d.fillOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
+            g2d.setColor(Color.ORANGE);
+            g2d.drawOval(myMinimapX - 5, myMinimapY - 5, 10, 10);
+
+            // 시야 범위 원 표시 (반투명)
+            int visionRadius = (int)(VISION_RANGE * ((scaleX + scaleY) * 0.5f));
+            g2d.setColor(new Color(255, 255, 255, 30));
+            g2d.fillOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
+                        visionRadius * 2, visionRadius * 2);
+            g2d.setColor(new Color(255, 255, 255, 80));
+            g2d.drawOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
+                        visionRadius * 2, visionRadius * 2);
+
+            // 다른 플레이어들 표시
+            boolean thermalActive = (piperThermalRemaining > 0f || teamThermalRemaining > 0f);
+            boolean markActive = !thermalActive && (piperMarkRemaining > 0f || teamMarkRemaining > 0f);
+            int extendedRadius = (int)(VISION_RANGE * (markActive ? PIPER_MARK_RANGE_FACTOR : 1f));
+            synchronized (players) {
+                for (PlayerData pd : players.values()) {
+                    int dx = pd.x - playerX;
+                    int dy = pd.y - playerY;
+                    double distance = Math.sqrt(dx * dx + dy * dy);
+                    if ((thermalActive) || (markActive && distance <= extendedRadius) || (!markActive && !thermalActive && distance <= VISION_RANGE)) {
+                        int otherX = minimapX + (int)(pd.x * scaleX);
+                        int otherY = minimapY + (int)(pd.y * scaleY);
+                        if (thermalActive) {
+                            g2d.setColor(new Color(255, 180, 0));
+                            g2d.fillOval(otherX - PIPER_THERMAL_DOT_SIZE/2, otherY - PIPER_THERMAL_DOT_SIZE/2, PIPER_THERMAL_DOT_SIZE, PIPER_THERMAL_DOT_SIZE);
+                        } else {
+                            if (pd.team == GameConstants.TEAM_BLUE) {
+                                g2d.setColor(Color.BLUE);
+                            } else if (pd.team == GameConstants.TEAM_RED) {
+                                g2d.setColor(Color.RED);
+                            } else {
+                                g2d.setColor(Color.GRAY);
+                            }
+                            g2d.fillOval(otherX - 3, otherY - 3, 6, 6);
+                        }
+                    }
+                }
+            }
+
+            // 미니맵 레이블
+            g2d.setColor(Color.WHITE);
+            g2d.setFont(new Font("Arial", Font.BOLD, 10));
+            g2d.drawString("MAP", minimapX + 5, minimapY + 12);
         }
         
         private void drawHUD(Graphics2D g) {
@@ -213,24 +625,215 @@ public class GamePanel extends JFrame implements KeyListener {
             g.setColor(new Color(200, 255, 200));
             g.drawString("속도: " + String.format("%.1f", currentCharacterData.speed), 20, yPos);
             
+            // 스킬 HUD (화면 하단 중앙)
+            drawSkillHUD(g);
+            
             // 도움말
             g.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
             g.setColor(Color.YELLOW);
+            g.drawString("좌클릭: 기본공격 | E: 전술스킬 | R: 궁극기", 20, getHeight() - 40);
             g.drawString("B키: 캐릭터 선택", 20, getHeight() - 20);
+        }
+        
+        /**
+         * 스킬 UI 그리기 (화면 하단 중앙)
+         */
+        private void drawSkillHUD(Graphics2D g) {
+            if (abilities == null) return;
+            
+            int hudWidth = 400;
+            int hudHeight = 80;
+            int hudX = (getWidth() - hudWidth) / 2;
+            int hudY = getHeight() - hudHeight - 10;
+            
+            // 배경
+            g.setColor(new Color(0, 0, 0, 180));
+            g.fillRoundRect(hudX, hudY, hudWidth, hudHeight, 10, 10);
+            
+            // 각 스킬 박스 그리기
+            int skillWidth = 60;
+            int skillHeight = 60;
+            int skillGap = 20;
+            int startX = hudX + (hudWidth - (skillWidth * 3 + skillGap * 2)) / 2;
+            int skillY = hudY + 10;
+            
+            String[] keyLabels = {"좌클릭", "E", "R"};
+            Color[] skillColors = {
+                new Color(100, 200, 100),  // 기본공격 - 초록
+                new Color(100, 150, 255),  // 전술스킬 - 파랑
+                new Color(255, 100, 100)   // 궁극기 - 빨강
+            };
+            
+            for (int i = 0; i < 3 && i < abilities.length; i++) {
+                Ability ability = abilities[i];
+                int skillX = startX + i * (skillWidth + skillGap);
+                
+                // 스킬 박스 배경
+                if (ability.canUse()) {
+                    g.setColor(skillColors[i]);
+                } else {
+                    g.setColor(new Color(40, 40, 40));
+                }
+                g.fillRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
+                
+                // 테두리 (Piper 활성화 시 컬러)
+                boolean piper = "piper".equalsIgnoreCase(selectedCharacter);
+                float remain = 0f;
+                Color activeBorder = Color.WHITE;
+                if (piper) {
+                    if (i == 1) remain = Math.max(piperMarkRemaining, 0f);
+                    else if (i == 2) remain = Math.max(piperThermalRemaining, 0f);
+                    if (remain > 0f) {
+                        activeBorder = (i == 1) ? new Color(80, 200, 255) : new Color(255, 160, 40);
+                    }
+                }
+                g.setColor(activeBorder);
+                g.setStroke(new BasicStroke((piper && remain > 0f) ? 3f : 2f));
+                g.drawRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
+                
+                // 쿨타임 오버레이 (어둡게)
+                if (!ability.canUse()) {
+                    float cooldownPercent = ability.getCooldownPercent();
+                    int overlayHeight = (int)(skillHeight * cooldownPercent);
+                    g.setColor(new Color(0, 0, 0, 160));
+                    g.fillRoundRect(skillX, skillY + (skillHeight - overlayHeight), 
+                                    skillWidth, overlayHeight, 8, 8);
+                    
+                    // 쿨타임 텍스트
+                    g.setColor(Color.WHITE);
+                    g.setFont(new Font("맑은 고딕", Font.BOLD, 16));
+                    String cooldownText = String.format("%.1f", ability.getCurrentCooldown());
+                    FontMetrics fm = g.getFontMetrics();
+                    int textWidth = fm.stringWidth(cooldownText);
+                    g.drawString(cooldownText, 
+                               skillX + (skillWidth - textWidth) / 2, 
+                               skillY + skillHeight / 2 + 6);
+                }
+                
+                // 키 라벨
+                g.setColor(Color.YELLOW);
+                g.setFont(new Font("맑은 고딕", Font.BOLD, 10));
+                FontMetrics fm = g.getFontMetrics();
+                int labelWidth = fm.stringWidth(keyLabels[i]);
+                g.drawString(keyLabels[i], 
+                           skillX + (skillWidth - labelWidth) / 2, 
+                           skillY - 5);
+                
+                // 스킬 이름 (박스 아래)
+                g.setColor(Color.WHITE);
+                g.setFont(new Font("맑은 고딕", Font.PLAIN, 10));
+                fm = g.getFontMetrics();
+                int nameWidth = fm.stringWidth(ability.getName());
+                g.drawString(ability.getName(), 
+                           skillX + (skillWidth - nameWidth) / 2, 
+                           skillY + skillHeight + 15);
+
+                // Piper 남은 시간 숫자 표시 (활성일 때)
+                if ("piper".equalsIgnoreCase(selectedCharacter) && ((i == 1 && piperMarkRemaining > 0f) || (i == 2 && piperThermalRemaining > 0f))) {
+                    float seconds = (i == 1 ? piperMarkRemaining : piperThermalRemaining);
+                    String txt = String.format("%.1f s", seconds);
+                    g.setFont(new Font("맑은 고딕", Font.BOLD, 12));
+                    g.setColor(Color.WHITE);
+                    FontMetrics fm2 = g.getFontMetrics();
+                    int tw = fm2.stringWidth(txt);
+                    g.drawString(txt, skillX + (skillWidth - tw) / 2, skillY + skillHeight / 2 + 5);
+                }
+            }
+        }
+
+        /** 편집 모드 타일 오버레이 */
+        private void drawEditorOverlay(Graphics2D g2d) {
+            if (walkableGrid == null) return;
+            // 반투명 레이어로 전체 walkable/unwalkable 시각화 (간단한 색)
+            int startCol = cameraX / TILE_SIZE;
+            int startRow = cameraY / TILE_SIZE;
+            int endCol = Math.min(gridCols - 1, (cameraX + GameConstants.GAME_WIDTH) / TILE_SIZE + 1);
+            int endRow = Math.min(gridRows - 1, (cameraY + GameConstants.GAME_HEIGHT) / TILE_SIZE + 1);
+            for (int r = startRow; r <= endRow; r++) {
+                for (int c = startCol; c <= endCol; c++) {
+                    boolean walkable = walkableGrid[r][c];
+                    int px = c * TILE_SIZE - cameraX;
+                    int py = r * TILE_SIZE - cameraY;
+                    Color base = walkable ? new Color(0, 180, 0, 55) : new Color(180, 0, 0, 60);
+                    if (isSpawnTile(redSpawnTiles, c, r)) {
+                        base = new Color(255, 60, 60, 120);
+                    } else if (isSpawnTile(blueSpawnTiles, c, r)) {
+                        base = new Color(60, 120, 255, 120);
+                    }
+                    g2d.setColor(base);
+                    g2d.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                }
+            }
+            // 호버 타일 강조
+            if (hoverCol >= 0 && hoverRow >= 0 && hoverCol < gridCols && hoverRow < gridRows) {
+                int hx = hoverCol * TILE_SIZE - cameraX;
+                int hy = hoverRow * TILE_SIZE - cameraY;
+                g2d.setColor(new Color(255, 255, 0, 120));
+                g2d.drawRect(hx, hy, TILE_SIZE - 1, TILE_SIZE - 1);
+            }
+            // 모드 안내 텍스트
+            g2d.setColor(Color.WHITE);
+            g2d.setFont(new Font("Arial", Font.BOLD, 12));
+            String modeName;
+            switch (editPaintMode) {
+                case 0 -> modeName = "이동 가능";
+                case 1 -> modeName = "이동 불가";
+                case 2 -> modeName = "RED 스폰";
+                case 3 -> modeName = "BLUE 스폰";
+                default -> modeName = "?";
+            }
+            g2d.drawString("[EDIT MODE] 1=Walk 2=Block 3=RedSpawn 4=BlueSpawn | 현재=" + modeName + " | 좌클릭/드래그 | F4 종료", 10, 20);
+            g2d.setFont(new Font("Arial", Font.PLAIN, 11));
+            g2d.drawString("저장: Ctrl+S / F5", 10, 35);
         }
     }
     
-    public GamePanel(String playerName, int team, Socket socket, DataOutputStream out, DataInputStream in) {
+    public GamePanel(String playerName, int team, Socket socket, DataOutputStream out, DataInputStream in, String characterId) {
         super("FPS Game - " + playerName);
         this.playerName = playerName;
         this.team = team;
         this.socket = socket;
         this.out = out;
         this.in = in;
+        
+        // 전달받은 캐릭터 ID 사용 (null이면 기본값)
+        this.selectedCharacter = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
         this.currentCharacterData = CharacterData.getById(selectedCharacter);
+        
+        // 스킬 초기화
+        this.abilities = CharacterData.createAbilities(selectedCharacter);
+        
+        // 맵 로드
+        loadMap(currentMapName);
+        
+        // 플레이어 초기 위치 (팀별 스폰 지역)
+        setInitialSpawnPosition();
         
         initUI();
         startGame();
+    }
+    
+    /**
+     * 팀별 초기 스폰 위치 설정
+     * RED 팀 = 왼쪽 상단 (빨강 스폰 지역)
+     * BLUE 팀 = 오른쪽 하단 (파랑 스폰 지역)
+     */
+    private void setInitialSpawnPosition() {
+        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
+        if (tiles != null && !tiles.isEmpty()) {
+            java.util.Random rand = new java.util.Random();
+            int[] t = tiles.get(rand.nextInt(tiles.size()));
+            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
+            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
+        } else {
+            appendChatMessage("[경고] 팀 스폰 타일이 비어 있습니다. 맵 JSON의 spawns." +
+                    (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
+            // 임시 폴백: 맵 중앙
+            playerX = mapWidth / 2;
+            playerY = mapHeight / 2;
+        }
+        appendChatMessage("[스폰] " + (team == GameConstants.TEAM_RED ? "RED" : "BLUE") +
+                " 팀 스폰 위치: (" + playerX + ", " + playerY + ")");
     }
     
     private void initUI() {
@@ -345,8 +948,537 @@ public class GamePanel extends JFrame implements KeyListener {
         });
     }
     
+    /**
+     * 맵 로드 및 장애물 설정
+     */
+    private void loadMap(String mapName) {
+        try {
+            // 맵 이미지 로드 (assets/maps/ 경로)
+            java.io.File mapFile = new java.io.File("assets/maps/" + mapName + ".png");
+            if (mapFile.exists()) {
+                mapImage = javax.imageio.ImageIO.read(mapFile);
+                if (mapImage != null) {
+                    // 맵 이미지가 있으면 그 크기를 사용
+                    mapWidth = mapImage.getWidth();
+                    mapHeight = mapImage.getHeight();
+                    appendChatMessage("[시스템] 맵 로드 완료: " + mapName + " (" + mapWidth + "x" + mapHeight + ")");
+                } else {
+                    appendChatMessage("[시스템] 맵 이미지 읽기 실패, 기본 크기 사용");
+                }
+            } else {
+                appendChatMessage("[시스템] 맵 파일 없음: " + mapFile.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            appendChatMessage("[시스템] 맵 로드 에러: " + e.getMessage());
+            // 폴백: 기본 크기 유지
+        }
+        // 그리드 크기 초기화
+        gridCols = Math.max(1, mapWidth / TILE_SIZE);
+        gridRows = Math.max(1, mapHeight / TILE_SIZE);
+        walkableGrid = new boolean[gridRows][gridCols];
+        
+    // 1) JSON 로딩 시도 (assets/maps/<mapName>_edited.json → .edited.json → .json → map_*.json)
+    boolean loadedFromJson = loadMapFromJsonIfAvailable(mapName);
+        
+        // 2) JSON 없으면 이미지 분석으로 장애물 추출
+        if (!loadedFromJson) {
+            setupObstacles(mapName);
+        }
+
+        // 3) 스폰 구역은 항상 walkable 보장 + 겹치는 장애물 제거
+        ensureSpawnZonesWalkable();
+        
+        // 4) JSON에 스폰 구역이 정의되지 않은 경우 에러 처리
+        if (redSpawnZone == null || blueSpawnZone == null) {
+            appendChatMessage("[경고] 스폰 구역이 JSON에 정의되지 않았습니다. 게임 시작 불가!");
+        }
+    }
+    
+    /**
+     * 맵별 장애물 설정 (이미지 픽셀 분석 기반 자동 추출)
+     */
+    private void setupObstacles(String mapName) {
+        obstacles.clear();
+        
+        appendChatMessage("[디버그] 맵 크기: " + mapWidth + "x" + mapHeight);
+        
+        // map.png의 경우 픽셀 분석으로 장애물 자동 추출하고, 그리드 갱신
+        if ("map".equals(mapName) && mapImage != null) {
+            extractObstaclesFromImage();
+            // 이미지 기반일 때: 기본적으로 길이 아닌 곳은 장애물 -> walkableGrid 초기화
+            for (int r = 0; r < gridRows; r++) {
+                for (int c = 0; c < gridCols; c++) {
+                    int cx = c * TILE_SIZE + TILE_SIZE / 2;
+                    int cy = r * TILE_SIZE + TILE_SIZE / 2;
+                    if (cx < mapWidth && cy < mapHeight) {
+                        Color color = new Color(mapImage.getRGB(cx, cy));
+                        walkableGrid[r][c] = isRoadColor(color) || isSpawnAreaColor(color);
+                    }
+                }
+            }
+        } else if ("terminal".equals(mapName)) {
+            // 기존 터미널 맵 (수동 설정)
+            int centerX = mapWidth / 2;
+            int centerY = mapHeight / 2;
+            obstacles.add(new Rectangle(centerX - 300, centerY - 200, 600, 400));
+            
+            int leftX = (int)(mapWidth * 0.15);
+            obstacles.add(new Rectangle(leftX, (int)(mapHeight * 0.25), 150, 150));
+            obstacles.add(new Rectangle(leftX, (int)(mapHeight * 0.42), 150, 150));
+            obstacles.add(new Rectangle(leftX, (int)(mapHeight * 0.59), 150, 150));
+            
+            int rightX = (int)(mapWidth * 0.85) - 150;
+            obstacles.add(new Rectangle(rightX, (int)(mapHeight * 0.25), 150, 150));
+            obstacles.add(new Rectangle(rightX, (int)(mapHeight * 0.42), 150, 150));
+            obstacles.add(new Rectangle(rightX, (int)(mapHeight * 0.59), 150, 150));
+            
+            obstacles.add(new Rectangle(centerX - 200, (int)(mapHeight * 0.1), 120, 120));
+            obstacles.add(new Rectangle(centerX + 80, (int)(mapHeight * 0.1), 120, 120));
+            obstacles.add(new Rectangle(centerX - 200, (int)(mapHeight * 0.9) - 120, 120, 120));
+            obstacles.add(new Rectangle(centerX + 80, (int)(mapHeight * 0.9) - 120, 120, 120));
+        }
+        
+        appendChatMessage("[디버그] 장애물 " + obstacles.size() + "개 설정 완료");
+    }
+
+    /**
+     * assets/maps 디렉토리에서 해당 맵 이름의 json 파일만 로딩한다.
+     * 우선순위: <name>_edited.json → <name>.edited.json → <name>.json
+     */
+    private boolean loadMapFromJsonIfAvailable(String mapName) {
+        File dir = new File("assets/maps");
+        if (!dir.exists()) return false;
+
+        // 우선순위: <name>_edited.json → <name>.edited.json → <name>.json (타 맵 fallback 금지)
+        File editedUnderscore = new File(dir, mapName + "_edited.json");
+        File editedDot = new File(dir, mapName + ".edited.json");
+        File primary = new File(dir, mapName + ".json");
+        File target = editedUnderscore.exists() ? editedUnderscore : (editedDot.exists() ? editedDot : (primary.exists() ? primary : null));
+        if (target == null || !target.exists()) return false;
+
+        try {
+            String json = new String(java.nio.file.Files.readAllBytes(target.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            parseMapJson(json);
+            appendChatMessage("[맵 데이터] JSON 로드: " + target.getName());
+            return true;
+        } catch (IOException e) {
+            appendChatMessage("[맵 데이터] JSON 로드 실패: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 맵 전환: 이름을 바꾸고 리소스를 다시 로드, 스폰 재배치 및 카메라 갱신
+     */
+    private void switchMap(String newMapName) {
+        this.currentMapName = newMapName;
+        appendChatMessage("[시스템] 맵 전환: " + newMapName);
+        loadMap(newMapName);
+        setInitialSpawnPosition();
+        updateCamera();
+        missiles.clear();
+        sendPosition();
+    }
+
+    /**
+     * assets/maps 아래에서 사용 가능한 맵 이름 목록을 재구성한다.
+     * 우선순위: _edited.json / .edited.json / .json 중 하나라도 있으면 해당 baseName을 포함.
+     * 기본으로 "map", "airport"는 항상 선두에 배치(중복 제거됨).
+     */
+    private void rebuildMapCycle() {
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+    // 기본 선호 순서
+    names.add("map");
+    names.add("airport");
+        names.add("terminal");
+        names.add("garden");
+        names.add("village");
+
+        File dir = new File("assets" + File.separator + "maps");
+        if (dir.exists() && dir.isDirectory()) {
+            File[] files = dir.listFiles((d, n) -> n.endsWith("_edited.json") || n.endsWith(".edited.json") || n.endsWith(".json"));
+            if (files != null) {
+                // 사전 정렬하여 일관된 순서
+                java.util.Arrays.sort(files, java.util.Comparator.comparing(File::getName));
+                for (File f : files) {
+                    String n = f.getName();
+                    String base;
+                    if (n.endsWith("_edited.json")) base = n.substring(0, n.length() - "_edited.json".length());
+                    else if (n.endsWith(".edited.json")) base = n.substring(0, n.length() - ".edited.json".length());
+                    else base = n.substring(0, n.length() - ".json".length());
+                    if (!base.isEmpty()) names.add(base);
+                }
+            }
+        }
+        mapCycle = new ArrayList<>(names);
+        int idx = mapCycle.indexOf(currentMapName);
+        mapIndex = (idx >= 0 ? idx : 0);
+        appendChatMessage("[시스템] 맵 목록: " + String.join(", ", mapCycle));
+    }
+
+    /**
+     * 매우 단순한 파서로 JSON에서 사각형 목록과 맵 메타데이터를 추출한다.
+     * 새 형식: meta.map_pixel_size.w/h, meta.tile_size, obstacles:[{x,y}], spawns.red/blue
+     */
+    private void parseMapJson(String json) {
+        if (json == null) return;
+
+        // 메타데이터 (새 형식 meta.map_pixel_size.w/h, meta.tile_size 지원)
+        Integer mw = null, mh = null, ts = null;
+        
+        // map_pixel_size.w 찾기
+        java.util.regex.Matcher mwMatch = java.util.regex.Pattern.compile("\"map_pixel_size\"\\s*:\\s*\\{[^}]*\"w\"\\s*:\\s*(\\d+)").matcher(json);
+        if (mwMatch.find()) mw = Integer.parseInt(mwMatch.group(1));
+        
+        // map_pixel_size.h 찾기
+        java.util.regex.Matcher mhMatch = java.util.regex.Pattern.compile("\"map_pixel_size\"\\s*:\\s*\\{[^}]*\"h\"\\s*:\\s*(\\d+)").matcher(json);
+        if (mhMatch.find()) mh = Integer.parseInt(mhMatch.group(1));
+        
+        // tile_size 찾기
+        java.util.regex.Matcher tsMatch = java.util.regex.Pattern.compile("\"tile_size\"\\s*:\\s*(\\d+)").matcher(json);
+        if (tsMatch.find()) ts = Integer.parseInt(tsMatch.group(1));
+        
+        if (mw != null) mapWidth = mw;
+        if (mh != null) mapHeight = mh;
+        if (ts != null && ts > 0) {
+            gridCols = Math.max(1, mapWidth / ts);
+            gridRows = Math.max(1, mapHeight / ts);
+            walkableGrid = new boolean[gridRows][gridCols];
+        }
+
+        // 새 형식: roads는 이동 가능한 타일 좌표 {x, y} 배열 → 기본 모두 false, roads만 true
+        // 하위 호환: obstacles가 있으면 obstacles 방식 사용, 없으면 roads 방식 사용
+        java.util.List<int[]> roadTiles = extractTileList(json, "roads");
+        java.util.List<int[]> obstacleTiles = extractTileList(json, "obstacles");
+        
+        obstacles.clear();
+        
+        if (!roadTiles.isEmpty()) {
+            // roads 방식: 모든 타일 기본 false(장애물) → roads만 true(이동 가능)
+            for (int r = 0; r < gridRows; r++) {
+                for (int c = 0; c < gridCols; c++) walkableGrid[r][c] = false;
+            }
+            
+            for (int[] tile : roadTiles) {
+                int col = tile[0];
+                int row = tile[1];
+                if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
+                    walkableGrid[row][col] = true;
+                }
+            }
+            
+            // 시각화를 위해 walkable하지 않은 타일을 obstacles에 추가
+            for (int r = 0; r < gridRows; r++) {
+                for (int c = 0; c < gridCols; c++) {
+                    if (!walkableGrid[r][c]) {
+                        obstacles.add(new Rectangle(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE));
+                    }
+                }
+            }
+        } else if (!obstacleTiles.isEmpty()) {
+            // 기존 obstacles 방식: 모든 타일 기본 true(이동 가능) → obstacles만 false(장애물)
+            for (int r = 0; r < gridRows; r++) {
+                for (int c = 0; c < gridCols; c++) walkableGrid[r][c] = true;
+            }
+            
+            for (int[] tile : obstacleTiles) {
+                int col = tile[0];
+                int row = tile[1];
+                if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
+                    walkableGrid[row][col] = false;
+                    obstacles.add(new Rectangle(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE));
+                }
+            }
+        }
+
+    // 스폰 구역 (spawns.red, spawns.blue의 tiles 배열)
+    // 맵 전환 시 이전 맵의 스폰 타일이 남지 않도록 먼저 초기화
+    redSpawnTiles.clear();
+    blueSpawnTiles.clear();
+    redSpawnZone = extractSpawnZone(json, "red", redSpawnTiles);
+    blueSpawnZone = extractSpawnZone(json, "blue", blueSpawnTiles);
+
+        // 스폰 구역은 항상 walkable로 강제
+        ensureSpawnZonesWalkable();
+        
+        int walkableCount = 0;
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                if (walkableGrid[r][c]) walkableCount++;
+            }
+        }
+        
+    String mapType = !roadTiles.isEmpty() ? "roads" : "obstacles";
+        appendChatMessage("[맵 JSON] " + mapType + " 방식, 이동 가능 타일 " + walkableCount + "개, RED 스폰 " + 
+                          (redSpawnZone != null ? "설정" : "없음") + ", BLUE 스폰 " +
+                          (blueSpawnZone != null ? "설정" : "없음"));
+    }
+
+    /**
+     * JSON에서 타일 좌표 배열 {x, y} 추출
+     */
+    private java.util.List<int[]> extractTileList(String json, String key) {
+        java.util.List<int[]> list = new ArrayList<>();
+        java.util.regex.Pattern section = java.util.regex.Pattern.compile("\"" + key + "\"\\s*:\\s*\\[(.*?)\\]", java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher sec = section.matcher(json);
+        if (!sec.find()) return list;
+        String body = sec.group(1);
+
+        // {x: 숫자, y: 숫자} 형식 파싱
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"x\"\\s*:\\s*(\\d+).*?\"y\"\\s*:\\s*(\\d+)", java.util.regex.Pattern.DOTALL).matcher(body);
+        while (m.find()) {
+            int x = Integer.parseInt(m.group(1));
+            int y = Integer.parseInt(m.group(2));
+            list.add(new int[]{x, y});
+        }
+        return list;
+    }
+
+    /**
+     * spawns.red/blue의 tiles 배열에서 스폰 구역(Rectangle) 생성
+     */
+    private Rectangle extractSpawnZone(String json, String teamKey, java.util.List<int[]> tileStore) {
+    // spawns -> teamKey -> tiles 배열을 비균형 중괄호 환경에서도 안전하게 비탐욕으로 추출
+    java.util.regex.Pattern path = java.util.regex.Pattern.compile(
+        "\\\"spawns\\\"\\s*:\\s*\\{[\\s\\S]*?\\\"" + teamKey + "\\\"\\s*:\\s*\\{[\\s\\S]*?\\\"tiles\\\"\\s*:\\s*\\[(.*?)\\]",
+        java.util.regex.Pattern.DOTALL);
+    java.util.regex.Matcher m = path.matcher(json);
+    if (!m.find()) return null;
+    String tilesBody = m.group(1);
+
+    int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
+    int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+    java.util.regex.Matcher tileCoords = java.util.regex.Pattern
+        .compile("\\\"x\\\"\\s*:\\s*(\\d+).*?\\\"y\\\"\\s*:\\s*(\\d+)", java.util.regex.Pattern.DOTALL)
+        .matcher(tilesBody);
+    while (tileCoords.find()) {
+        int x = Integer.parseInt(tileCoords.group(1));
+        int y = Integer.parseInt(tileCoords.group(2));
+        tileStore.add(new int[]{x, y});
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+    }
+    if (minX == Integer.MAX_VALUE) return null;
+    return new Rectangle(minX * TILE_SIZE, minY * TILE_SIZE, (maxX - minX + 1) * TILE_SIZE, (maxY - minY + 1) * TILE_SIZE);
+    }
+
+    /*
+     * [DEPRECATED] walkableGrid를 기반으로 좌상단/우하단 스폰 구역 자동 탐지
+     * 현재는 JSON에서만 스폰 구역을 로드합니다.
+     */
+    /*
+    private void autoDetectSpawnZones() {
+        int wantTiles = 6; // 6x6 타일
+        redSpawnZone = findSpawnZoneNear(0, 0, wantTiles);
+        blueSpawnZone = findSpawnZoneNear(gridCols - 1, gridRows - 1, wantTiles);
+        appendChatMessage("[스폰] 자동 탐지 완료");
+    }
+
+    private Rectangle findSpawnZoneNear(int startCol, int startRow, int sizeTiles) {
+        int maxRadius = Math.max(gridCols, gridRows);
+        for (int rad = 0; rad < maxRadius; rad++) {
+            int c0 = Math.max(0, startCol - rad);
+            int r0 = Math.max(0, startRow - rad);
+            int c1 = Math.min(gridCols - sizeTiles, startCol + rad);
+            int r1 = Math.min(gridRows - sizeTiles, startRow + rad);
+            for (int r = r0; r <= r1; r++) {
+                for (int c = c0; c <= c1; c++) {
+                    if (isAllWalkable(c, r, sizeTiles, sizeTiles)) {
+                        return new Rectangle(c * TILE_SIZE, r * TILE_SIZE, sizeTiles * TILE_SIZE, sizeTiles * TILE_SIZE);
+                    }
+                }
+            }
+        }
+        return new Rectangle(startCol * TILE_SIZE, startRow * TILE_SIZE, sizeTiles * TILE_SIZE, sizeTiles * TILE_SIZE);
+    }
+
+    private boolean isAllWalkable(int col, int row, int wTiles, int hTiles) {
+        for (int r = row; r < row + hTiles && r < gridRows; r++) {
+            for (int c = col; c < col + wTiles && c < gridCols; c++) {
+                if (!walkableGrid[r][c]) return false;
+            }
+        }
+        return true;
+    }
+    */
+
+    /**
+     * 스폰 구역을 walkableGrid에 강제로 반영하고, 해당 영역과 겹치는 장애물은 제거
+     */
+    private void ensureSpawnZonesWalkable() {
+        if (walkableGrid == null) return;
+        if (redSpawnZone != null) markZoneWalkableAndClearObstacles(redSpawnZone);
+        if (blueSpawnZone != null) markZoneWalkableAndClearObstacles(blueSpawnZone);
+    }
+
+    private void markZoneWalkableAndClearObstacles(Rectangle zone) {
+        // walkableGrid true
+        int c0 = Math.max(0, zone.x / TILE_SIZE);
+        int r0 = Math.max(0, zone.y / TILE_SIZE);
+        int c1 = Math.min(gridCols - 1, (zone.x + zone.width - 1) / TILE_SIZE);
+        int r1 = Math.min(gridRows - 1, (zone.y + zone.height - 1) / TILE_SIZE);
+        for (int r = r0; r <= r1; r++) {
+            for (int c = c0; c <= c1; c++) walkableGrid[r][c] = true;
+        }
+        // 겹치는 장애물 제거
+        if (obstacles != null && !obstacles.isEmpty()) {
+            obstacles.removeIf(o -> o.intersects(zone));
+        }
+        // 스폰 타일 목록이 있으면 그것도 walkable (보다 정확한 경계 유지)
+        java.util.List<int[]> tiles = (zone == redSpawnZone ? redSpawnTiles : (zone == blueSpawnZone ? blueSpawnTiles : null));
+        if (tiles != null) {
+            for (int[] t : tiles) {
+                int col = t[0];
+                int row = t[1];
+                if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
+                    walkableGrid[row][col] = true;
+                }
+            }
+        }
+    }
+    
+    /**
+     * 맵 이미지 픽셀 분석으로 장애물 자동 추출
+     * - 밝은 회색(길) + 스폰 지역만 이동 가능
+     * - 나머지는 모두 장애물 (벽, 나무, 잔디 등)
+     */
+    private void extractObstaclesFromImage() {
+        if (mapImage == null) return;
+        
+        int tileSize = 32; // 타일 크기 (맵 타일 크기와 동일)
+        int cols = mapWidth / tileSize;
+        int rows = mapHeight / tileSize;
+        
+        // 장애물 타일 감지용 그리드 (이동 불가능 영역)
+        boolean[][] obstacleGrid = new boolean[rows][cols];
+        
+        // 픽셀 샘플링으로 이동 가능/불가능 영역 감지
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                int centerX = col * tileSize + tileSize / 2;
+                int centerY = row * tileSize + tileSize / 2;
+                
+                // 이미지 범위 체크
+                if (centerX >= mapImage.getWidth() || centerY >= mapImage.getHeight()) {
+                    obstacleGrid[row][col] = true; // 범위 밖은 장애물
+                    continue;
+                }
+                
+                int rgb = mapImage.getRGB(centerX, centerY);
+                Color color = new Color(rgb);
+                
+                // 이동 가능한 영역 체크 (밝은 회색 길 + 스폰 지역)
+                boolean isWalkable = isRoadColor(color) || isSpawnAreaColor(color);
+                
+                // 이동 불가능하면 장애물로 표시
+                if (!isWalkable) {
+                    obstacleGrid[row][col] = true;
+                }
+            }
+        }
+        
+        // 연속된 장애물 타일을 그룹핑하여 큰 Rectangle로 병합
+        boolean[][] visited = new boolean[rows][cols];
+        
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                if (obstacleGrid[row][col] && !visited[row][col]) {
+                    // 새로운 장애물 영역 발견 - 확장 가능한 사각형 찾기
+                    Rectangle rect = findMaxRectangle(obstacleGrid, visited, row, col, rows, cols);
+                    if (rect.width > 0 && rect.height > 0) {
+                        // 타일 좌표를 픽셀 좌표로 변환
+                        obstacles.add(new Rectangle(
+                            rect.x * tileSize,
+                            rect.y * tileSize,
+                            rect.width * tileSize,
+                            rect.height * tileSize
+                        ));
+                    }
+                }
+            }
+        }
+        
+        appendChatMessage("[맵 분석] 장애물 " + obstacles.size() + "개 자동 추출 완료");
+    }
+    
+    /**
+     * 밝은 회색 길 색상 판단
+     */
+    private boolean isRoadColor(Color c) {
+        int r = c.getRed();
+        int g = c.getGreen();
+        int b = c.getBlue();
+        
+        // 밝은 회색 (RGB 값이 비슷하고 높은 값)
+        // 회색 계열: R, G, B 차이가 작고, 밝기가 높음
+        int avg = (r + g + b) / 3;
+        int maxDiff = Math.max(Math.abs(r - g), Math.max(Math.abs(g - b), Math.abs(r - b)));
+        
+        // 밝은 회색: 평균 밝기 140~200, RGB 차이 30 이하
+        return (avg >= 140 && avg <= 200) && (maxDiff <= 30);
+    }
+    
+    /**
+     * 스폰 지역 색상 판단 (왼쪽 상단 = 빨강 계열, 오른쪽 하단 = 파랑 계열)
+     */
+    private boolean isSpawnAreaColor(Color c) {
+        int r = c.getRed();
+        int g = c.getGreen();
+        int b = c.getBlue();
+        
+        // 빨강 계열 스폰 (RED 팀 - 왼쪽 상단)
+        // 빨강이 강하고, 녹색/파랑보다 높음
+        boolean isRedSpawn = (r > 150) && (r > g + 30) && (r > b + 30);
+        
+        // 파랑 계열 스폰 (BLUE 팀 - 오른쪽 하단)
+        // 파랑이 강하고, 빨강/녹색보다 높음
+        boolean isBlueSpawn = (b > 150) && (b > r + 30) && (b > g + 30);
+        
+        return isRedSpawn || isBlueSpawn;
+    }
+    
+    /**
+     * 그리드에서 최대 사각형 영역 찾기 (Greedy 확장)
+     */
+    private Rectangle findMaxRectangle(boolean[][] grid, boolean[][] visited, 
+                                       int startRow, int startCol, int rows, int cols) {
+        // 우측으로 확장 가능한 최대 너비 찾기
+        int maxWidth = 0;
+        for (int c = startCol; c < cols && grid[startRow][c] && !visited[startRow][c]; c++) {
+            maxWidth++;
+        }
+        
+        // 아래로 확장 가능한 최대 높이 찾기 (너비 유지)
+        int maxHeight = 0;
+        for (int r = startRow; r < rows; r++) {
+            boolean canExpand = true;
+            for (int c = startCol; c < startCol + maxWidth; c++) {
+                if (!grid[r][c] || visited[r][c]) {
+                    canExpand = false;
+                    break;
+                }
+            }
+            if (canExpand) {
+                maxHeight++;
+            } else {
+                break;
+            }
+        }
+        
+        // 방문 표시
+        for (int r = startRow; r < startRow + maxHeight; r++) {
+            for (int c = startCol; c < startCol + maxWidth; c++) {
+                visited[r][c] = true;
+            }
+        }
+        
+        return new Rectangle(startCol, startRow, maxWidth, maxHeight);
+    }
+    
     private void startGame() {
-        // 게임 업데이트 타이머
+        // 게임 업데이트 타이머 (60 FPS)
         timer = new javax.swing.Timer(16, e -> {
             updateGame();
             canvas.repaint();
@@ -361,6 +1493,13 @@ public class GamePanel extends JFrame implements KeyListener {
         updatePlayerPosition();
         updateMissiles();
         checkCollisions();
+        updateAbilities(); // 스킬 쿨타임 업데이트
+        updateEffects();   // 이펙트 타이머 업데이트
+        // 구조화된 SkillEffect 수명 업데이트 (효과 클래스 기반)
+        skillEffects.update(0.016f);
+        updateRavenRuntime(); // Raven 버프/대쉬 처리
+        updatePiperRuntime(); // Piper 마킹/열감지 처리
+        updateTeamPiperRuntime(); // 원격 Piper 팀 버프 처리
         
         // 모든 다른 플레이어의 위치를 부드럽게 보간
         for (PlayerData pd : players.values()) {
@@ -368,31 +1507,214 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
     
+    /**
+     * 모든 스킬의 쿨타임 업데이트 (매 프레임)
+     */
+    private void updateAbilities() {
+        if (abilities != null) {
+            float deltaTime = 0.016f; // 16ms = 60 FPS
+            for (Ability ability : abilities) {
+                ability.update(deltaTime);
+            }
+        }
+    }
+
+    /**
+     * 이펙트 타이머 업데이트 및 만료 제거
+     */
+    private void updateEffects() {
+        float dt = 0.016f;
+        // 내 이펙트
+        if (!myEffects.isEmpty()) {
+            for (Iterator<ActiveEffect> it = myEffects.iterator(); it.hasNext();) {
+                ActiveEffect ef = it.next();
+                ef.remaining -= dt;
+                if (ef.remaining <= 0) it.remove();
+            }
+        }
+        // 다른 플레이어 이펙트
+        if (!effectsByPlayer.isEmpty()) {
+            for (java.util.List<ActiveEffect> list : effectsByPlayer.values()) {
+                for (Iterator<ActiveEffect> it = list.iterator(); it.hasNext();) {
+                    ActiveEffect ef = it.next();
+                    ef.remaining -= dt;
+                    if (ef.remaining <= 0) it.remove();
+                }
+            }
+        }
+    }
+
+    /**
+     * Raven 전용 런타임 처리: 대쉬 이동, 과충전 만료 처리
+     */
+    private void updateRavenRuntime() {
+        // 대쉬: 남은 시간 동안 추가 이동 (입력 방향 기준, 없으면 위쪽)
+        if (ravenDashRemaining > 0f) {
+            ravenDashRemaining -= 0.016f;
+            int vx = 0, vy = 0;
+            if (keys[KeyEvent.VK_W] || keys[KeyEvent.VK_UP]) vy -= 1;
+            if (keys[KeyEvent.VK_S] || keys[KeyEvent.VK_DOWN]) vy += 1;
+            if (keys[KeyEvent.VK_A] || keys[KeyEvent.VK_LEFT]) vx -= 1;
+            if (keys[KeyEvent.VK_D] || keys[KeyEvent.VK_RIGHT]) vx += 1;
+            if (vx == 0 && vy == 0) { vy = -1; } // 기본 전방(위쪽)
+            double len = Math.sqrt(vx*vx + vy*vy);
+            if (len > 0) {
+                double nx = vx/len, ny = vy/len;
+                int dashPixelsPerTick = 12; // 한 프레임 대쉬량
+                // 대쉬 시엔 벽을 절대 통과하지 않도록 1px 단위로 전진하며 체크 (슬라이딩 없음)
+                double fx = playerX;
+                double fy = playerY;
+                for (int i = 0; i < dashPixelsPerTick; i++) {
+                    fx += nx;
+                    fy += ny;
+                    int targetX = (int)Math.round(fx);
+                    int targetY = (int)Math.round(fy);
+                    targetX = Math.max(20, Math.min(targetX, mapWidth - 20));
+                    targetY = Math.max(20, Math.min(targetY, mapHeight - 20));
+                    if (checkCollisionWithObstacles(targetX, targetY)) {
+                        // 벽에 닿는 순간 대쉬 종료 (관통 금지)
+                        ravenDashRemaining = 0f;
+                        break;
+                    }
+                    playerX = targetX;
+                    playerY = targetY;
+                }
+            }
+        }
+
+        // 과충전: 만료 시 멀티플라이어 원복
+        if (ravenOverchargeRemaining > 0f) {
+            ravenOverchargeRemaining -= 0.016f;
+            if (ravenOverchargeRemaining <= 0f) {
+                missileSpeedMultiplier = 1f;
+                // 기본 공격 쿨다운 배수 원복
+                if (abilities != null && abilities.length > 0) {
+                    abilities[0].setCooldownMultiplier(1f);
+                }
+            }
+        }
+    }
+
+    /**
+     * Piper 전용 런타임 처리 (마킹 및 열감지 지속시간 감소)
+     */
+    private void updatePiperRuntime() {
+        if (piperMarkRemaining > 0f) {
+            piperMarkRemaining -= 0.016f;
+            if (piperMarkRemaining < 0f) piperMarkRemaining = 0f;
+        }
+        if (piperThermalRemaining > 0f) {
+            piperThermalRemaining -= 0.016f;
+            if (piperThermalRemaining < 0f) piperThermalRemaining = 0f;
+        }
+    }
+
+    private void updateTeamPiperRuntime() {
+        if (teamMarkRemaining > 0f) {
+            teamMarkRemaining -= 0.016f;
+            if (teamMarkRemaining < 0f) teamMarkRemaining = 0f;
+        }
+        if (teamThermalRemaining > 0f) {
+            teamThermalRemaining -= 0.016f;
+            if (teamThermalRemaining < 0f) teamThermalRemaining = 0f;
+        }
+    }
+    
     private void updatePlayerPosition() {
         int oldX = playerX;
         int oldY = playerY;
+        int newX = playerX;
+        int newY = playerY;
         
         if (keys[KeyEvent.VK_W] || keys[KeyEvent.VK_UP]) {
-            playerY -= SPEED;
+            newY -= SPEED;
         }
         if (keys[KeyEvent.VK_S] || keys[KeyEvent.VK_DOWN]) {
-            playerY += SPEED;
+            newY += SPEED;
         }
         if (keys[KeyEvent.VK_A] || keys[KeyEvent.VK_LEFT]) {
-            playerX -= SPEED;
+            newX -= SPEED;
         }
         if (keys[KeyEvent.VK_D] || keys[KeyEvent.VK_RIGHT]) {
-            playerX += SPEED;
+            newX += SPEED;
         }
         
-        // 경계 체크
-        playerX = Math.max(20, Math.min(playerX, GameConstants.GAME_WIDTH - 20));
-        playerY = Math.max(20, Math.min(playerY, GameConstants.GAME_HEIGHT - 20));
+        // 맵 경계 체크 (큰 맵)
+        newX = Math.max(20, Math.min(newX, mapWidth - 20));
+        newY = Math.max(20, Math.min(newY, mapHeight - 20));
+        
+        // 장애물 충돌 체크
+        if (!checkCollisionWithObstacles(newX, newY)) {
+            playerX = newX;
+            playerY = newY;
+        } else {
+            // 장애물과 충돌 시 X축과 Y축 개별 체크
+            if (!checkCollisionWithObstacles(newX, oldY)) {
+                playerX = newX;
+            }
+            if (!checkCollisionWithObstacles(oldX, newY)) {
+                playerY = newY;
+            }
+        }
+        
+        // 카메라 업데이트
+        updateCamera();
         
         // 위치가 변경되면 서버에 전송 (움직일 때만 전송하여 네트워크 부하 감소)
         if (oldX != playerX || oldY != playerY) {
             sendPosition();
         }
+    }
+    
+    /**
+     * 장애물 충돌 체크
+     */
+    private boolean checkCollisionWithObstacles(int x, int y) {
+        // 1) walkableGrid가 있으면 우선 사용: walkable이 아니면 충돌 간주
+        if (walkableGrid != null) {
+            if (!isPositionWalkable(x, y)) return true; // 이동 불가 = 충돌
+        }
+        // 2) 장애물 사각형 교차 검사 (폴백 및 보강)
+        Rectangle playerBounds = new Rectangle(x - 20, y - 20, 40, 40);
+        for (Rectangle obs : obstacles) {
+            if (playerBounds.intersects(obs)) {
+                return true; // 충돌 발생
+            }
+        }
+        return false; // 충돌 없음
+    }
+
+    /**
+     * 플레이어 반경을 샘플링하여 해당 위치가 모두 walkable인지 확인
+     */
+    private boolean isPositionWalkable(int x, int y) {
+        int r = 18; // 캐릭터 반경 근사
+        int[][] samples = new int[][]{
+            {x, y}, {x - r, y}, {x + r, y}, {x, y - r}, {x, y + r},
+            {x - r, y - r}, {x + r, y - r}, {x - r, y + r}, {x + r, y + r}
+        };
+        for (int[] p : samples) {
+            int cx = Math.max(0, Math.min(p[0], mapWidth - 1));
+            int cy = Math.max(0, Math.min(p[1], mapHeight - 1));
+            int col = cx / TILE_SIZE;
+            int row = cy / TILE_SIZE;
+            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) return false;
+            if (!walkableGrid[row][col]) return false;
+        }
+        return true;
+    }
+    
+    /**
+     * 카메라 업데이트 (플레이어 중심)
+     */
+    private void updateCamera() {
+        // 플레이어를 화면 중앙에 위치
+        cameraX = playerX - GameConstants.GAME_WIDTH / 2;
+        cameraY = playerY - GameConstants.GAME_HEIGHT / 2;
+        
+        // 카메라가 맵 경계를 벗어나지 않도록 제한
+        cameraX = Math.max(0, Math.min(cameraX, mapWidth - GameConstants.GAME_WIDTH));
+        cameraY = Math.max(0, Math.min(cameraY, mapHeight - GameConstants.GAME_HEIGHT));
     }
     
     private void updateMissiles() {
@@ -401,13 +1723,33 @@ public class GamePanel extends JFrame implements KeyListener {
             Missile m = it.next();
             m.x += m.dx;
             m.y += m.dy;
-            
-            // 화면 밖으로 나가면 제거
-            if (m.x < 0 || m.x > GameConstants.GAME_WIDTH || 
-                m.y < 0 || m.y > GameConstants.GAME_HEIGHT) {
+            // 맵 밖이면 제거 (전체 맵 기준)
+            if (m.x < 0 || m.x > mapWidth || m.y < 0 || m.y > mapHeight) {
                 it.remove();
+                continue;
+            }
+            // 벽 충돌: 타일 walkable 여부 + 장애물 Rect 교차
+            if (isMissileBlocked(m.x, m.y)) {
+                it.remove();
+                continue;
             }
         }
+    }
+
+    private boolean isMissileBlocked(int x, int y) {
+        // 타일 기반
+        if (walkableGrid != null) {
+            int col = x / TILE_SIZE;
+            int row = y / TILE_SIZE;
+            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) return true;
+            if (!walkableGrid[row][col]) return true;
+        }
+        // 장애물 Rect (정밀)
+        Rectangle r = new Rectangle(x - 2, y - 2, 4, 4);
+        for (Rectangle obs : obstacles) {
+            if (r.intersects(obs)) return true;
+        }
+        return false;
     }
     
     private void checkCollisions() {
@@ -455,22 +1797,30 @@ public class GamePanel extends JFrame implements KeyListener {
     }
     
     private void respawn() {
-        // 랜덤 위치에서 리스폰
-        Random rand = new Random();
-        if (team == GameConstants.TEAM_RED) {
-            playerX = rand.nextInt(200) + 100; // 왼쪽 영역
+        // 반드시 지정된 스폰 타일 중에서만 랜덤 스폰
+        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
+        if (tiles != null && !tiles.isEmpty()) {
+            java.util.Random rand = new java.util.Random();
+            int[] t = tiles.get(rand.nextInt(tiles.size()));
+            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
+            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
         } else {
-            playerX = rand.nextInt(200) + (GameConstants.GAME_WIDTH - 300); // 오른쪽 영역
+            appendChatMessage("[경고] 팀 스폰 타일이 비어 있어 임시 위치에 리스폰합니다. 맵 JSON의 spawns." +
+                    (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
+            // 임시 폴백: 맵 중앙
+            playerX = mapWidth / 2;
+            playerY = mapHeight / 2;
         }
-        playerY = rand.nextInt(GameConstants.GAME_HEIGHT - 100) + 50;
         myHP = GameConstants.MAX_HP;
+        
+        appendChatMessage("[리스폰] 위치: (" + playerX + ", " + playerY + ")");
         
         // 서버에 리스폰 알림
         try {
             out.writeUTF("RESPAWN:" + playerX + "," + playerY);
             out.flush();
         } catch (IOException ex) {
-            ex.printStackTrace();
+            appendChatMessage("[에러] 리스폰 전송 실패: " + ex.getMessage());
         }
         sendPosition();
     }
@@ -481,24 +1831,41 @@ public class GamePanel extends JFrame implements KeyListener {
                 out.writeUTF("POS:" + playerX + "," + playerY);
                 out.flush();
             } catch (IOException ex) {
-                ex.printStackTrace();
+                appendChatMessage("[에러] 위치 전송 실패: " + ex.getMessage());
             }
         }
     }
     
-    private void shootMissile() {
-        // 마우스 위치 방향으로 발사 (여기서는 위쪽으로 고정)
-    Missile missile = new Missile(playerX, playerY, 0, -GameConstants.MISSILE_SPEED, team, playerName);
+    private void shootMissile(int targetX, int targetY) {
+        // 플레이어 위치에서 마우스 방향으로 발사
+        int speed = (int)(GameConstants.MISSILE_SPEED * missileSpeedMultiplier);
+        int sx = playerX;
+        int sy = playerY;
+        int tx = targetX;
+        int ty = targetY;
+        int vx = tx - sx;
+        int vy = ty - sy;
+        if (vx == 0 && vy == 0) { vy = -1; }
+        double len = Math.sqrt(vx*vx + vy*vy);
+        double nx = (len > 0) ? (vx/len) : 0.0;
+        double ny = (len > 0) ? (vy/len) : -1.0;
+        int dx = (int) Math.round(nx * speed);
+        int dy = (int) Math.round(ny * speed);
+        Missile missile = new Missile(sx, sy, dx, dy, team, playerName);
         missiles.add(missile);
         
         if (out != null) {
             try {
-                out.writeUTF("SHOOT:" + playerX + "," + playerY + ",0,-" + GameConstants.MISSILE_SPEED);
+                out.writeUTF("SHOOT:" + sx + "," + sy + "," + dx + "," + dy);
                 out.flush();
             } catch (IOException ex) {
-                ex.printStackTrace();
+                appendChatMessage("[네트워크] 발사 전송 실패: " + ex.getMessage());
             }
         }
+
+        // 총구 섬광 이펙트 (로컬) - 발사 방향 각도 기반 단발 섬광
+        double angle = Math.atan2(ny, nx);
+        skillEffects.addSelf(new MuzzleFlashEffect(angle));
     }
     
     private void receiveGameUpdates() {
@@ -508,7 +1875,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 processGameMessage(message);
             }
         } catch (IOException ex) {
-            System.out.println("Disconnected from game server.");
+            System.out.println("서버와의 연결이 끊어졌습니다.");
         }
     }
     
@@ -604,10 +1971,84 @@ public class GamePanel extends JFrame implements KeyListener {
                         if (pd != null) {
                             Missile m = new Missile(sx, sy, dx, dy, pd.team, shooter);
                             missiles.add(m);
+                            // 원격 총구 섬광 이펙트 (발사 방향 기반)
+                            double ang = Math.atan2(dy, dx);
+                            skillEffects.addForPlayer(shooter, new MuzzleFlashEffect(ang));
                         }
                     }
                 }
                 break;
+
+            case "SKILL": {
+                // SKILL:playerName,abilityId,type,duration
+                String[] sd = data.split(",");
+                if (sd.length >= 4) {
+                    String user = sd[0];
+                    String abilityId = sd[1];
+                    String type = sd[2];
+                    float duration = 0.4f;
+                    try {
+                        duration = Float.parseFloat(sd[3]);
+                    } catch (NumberFormatException ignored) {
+                    }
+                    if (!user.equals(playerName)) {
+                        effectsByPlayer.computeIfAbsent(user, k -> new ArrayList<>())
+                                .add(new ActiveEffect(abilityId, type, Math.max(0.2f, duration)));
+                        // 구조화된 SkillEffect 등록 (원격 플레이어 시각 효과)
+                        if ("piper_mark".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new PiperMarkEffect(duration));
+                        } else if ("piper_thermal".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new PiperThermalEffect(duration));
+                        } else if ("raven_dash".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new RavenDashEffect(duration));
+                        } else if ("raven_overcharge".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new RavenOverchargeEffect(duration));
+                        } else if ("gen_aura".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new GeneralAuraEffect(duration));
+                        } else if ("gen_strike".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new GeneralStrikeEffect(duration));
+                        } else if ("bull_cover".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new BulldogCoverEffect(duration));
+                        } else if ("bull_barrage".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new BulldogBarrageEffect(duration));
+                        } else if ("wild_breach".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new WildcatBreachEffect(duration));
+                        } else if ("wild_berserk".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new WildcatBerserkEffect(duration));
+                        } else if ("ghost_cloak".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new GhostCloakEffect(duration));
+                        } else if ("ghost_nullify".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new GhostNullifyEffect(duration));
+                        } else if ("skull_adrenaline".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SkullAdrenalineEffect(duration));
+                        } else if ("skull_ammo".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SkullAmmoEffect(duration));
+                        } else if ("steam_emp".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SteamEmpEffect(duration));
+                        } else if ("steam_reset".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SteamResetEffect(duration));
+                        } else if ("tech_mine".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new TechMineEffect(duration));
+                        } else if ("tech_turret".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new TechTurretEffect(duration));
+                        } else if ("sage_heal".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SageHealEffect(duration));
+                        } else if ("sage_revive".equals(abilityId)) {
+                            skillEffects.addForPlayer(user, new SageReviveEffect(duration));
+                        }
+                        // 같은 팀 Piper 마킹/열감지 공유
+                        PlayerData pdUser = players.get(user);
+                        if (pdUser != null && pdUser.team == team) {
+                            if ("piper_mark".equalsIgnoreCase(abilityId)) {
+                                teamMarkRemaining = Math.max(teamMarkRemaining, duration);
+                            } else if ("piper_thermal".equalsIgnoreCase(abilityId)) {
+                                teamThermalRemaining = Math.max(teamThermalRemaining, duration);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
         }
     }
     
@@ -625,15 +2066,401 @@ public class GamePanel extends JFrame implements KeyListener {
     @Override
     public void keyPressed(KeyEvent e) {
         keys[e.getKeyCode()] = true;
+        // 편집 모드 저장 단축키 (Ctrl+S)
+        if (editMode && e.getKeyCode() == KeyEvent.VK_S && (e.isControlDown() || e.isMetaDown())) {
+            saveEditedMap();
+            return;
+        }
         
-        if (e.getKeyCode() == KeyEvent.VK_SPACE) {
-            shootMissile();
-        } else if (e.getKeyCode() == KeyEvent.VK_B) {
-            // B키: 캐릭터 선택 다이얼로그 표시
-            openCharacterSelect();
-        } else if (e.getKeyCode() == KeyEvent.VK_ENTER || e.getKeyCode() == KeyEvent.VK_T) {
-            // Enter 또는 T키: 채팅 입력창으로 포커스 이동
-            chatInput.requestFocusInWindow();
+        switch (e.getKeyCode()) {
+            case KeyEvent.VK_E -> useTacticalSkill(); // 전술 스킬
+            case KeyEvent.VK_R -> useUltimateSkill(); // 궁극기
+            case KeyEvent.VK_B -> openCharacterSelect(); // 캐릭터 선택
+            case KeyEvent.VK_M -> { // 미니맵 토글
+                showMinimap = !showMinimap;
+                appendChatMessage("[시스템] 미니맵 " + (showMinimap ? "켜짐" : "꺼짐"));
+            }
+            case KeyEvent.VK_F3 -> { // 장애물 디버그 토글
+                debugObstacles = !debugObstacles;
+                appendChatMessage("[디버그] 장애물 표시 " + (debugObstacles ? "ON" : "OFF"));
+            }
+            case KeyEvent.VK_F4 -> { // 편집 모드 토글
+                editMode = !editMode;
+                paintState = -1;
+                appendChatMessage(editMode ? "[에디터] 타일 편집 모드 ON" : "[에디터] 타일 편집 모드 OFF");
+            }
+            case KeyEvent.VK_1 -> { if (editMode) { editPaintMode = 0; appendChatMessage("[에디터] 모드: 이동 가능 칠하기"); } }
+            case KeyEvent.VK_2 -> { if (editMode) { editPaintMode = 1; appendChatMessage("[에디터] 모드: 이동 불가(벽) 칠하기"); } }
+            case KeyEvent.VK_3 -> { if (editMode) { editPaintMode = 2; appendChatMessage("[에디터] 모드: RED 스폰 토글"); } }
+            case KeyEvent.VK_4 -> { if (editMode) { editPaintMode = 3; appendChatMessage("[에디터] 모드: BLUE 스폰 토글"); } }
+            case KeyEvent.VK_F6 -> { // 맵 전환: 순환 목록 기반
+                rebuildMapCycle();
+                if (mapCycle == null || mapCycle.isEmpty()) {
+                    appendChatMessage("[시스템] 전환 가능한 맵이 없습니다.");
+                } else {
+                    int idx = mapCycle.indexOf(currentMapName);
+                    idx = (idx >= 0) ? (idx + 1) % mapCycle.size() : 0;
+                    mapIndex = idx;
+                    switchMap(mapCycle.get(idx));
+                }
+            }
+            case KeyEvent.VK_F5 -> { // 수동 저장 키
+                saveEditedMap();
+            }
+            case KeyEvent.VK_T, KeyEvent.VK_ENTER -> chatInput.requestFocusInWindow(); // 채팅 포커스
+        }
+    }
+
+    // ===== 편집 모드 유틸 =====
+    private void updateHoverTile(int mapX, int mapY) {
+        if (walkableGrid == null) return;
+        int col = mapX / TILE_SIZE;
+        int row = mapY / TILE_SIZE;
+        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) {
+            hoverCol = -1; hoverRow = -1; return;
+        }
+        hoverCol = col; hoverRow = row;
+    }
+
+    private void startPaintAt(int mapX, int mapY) {
+        if (walkableGrid == null) return;
+        int col = mapX / TILE_SIZE;
+        int row = mapY / TILE_SIZE;
+        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) return;
+        applyEditAction(col, row, false);
+        hoverCol = col; hoverRow = row;
+    }
+
+    private void continuePaintAt(int mapX, int mapY) {
+        if (walkableGrid == null || paintState == -1) return;
+        int col = mapX / TILE_SIZE;
+        int row = mapY / TILE_SIZE;
+        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) return;
+        hoverCol = col; hoverRow = row;
+        applyEditAction(col, row, true);
+    }
+
+    // 편집 모드 액션 적용
+    private void applyEditAction(int col, int row, boolean dragging) {
+        switch (editPaintMode) {
+            case 0 -> { // 이동 가능 칠하기
+                boolean before = walkableGrid[row][col];
+                walkableGrid[row][col] = true;
+                if (!dragging) paintState = 1;
+                if (before != walkableGrid[row][col]) rebuildObstaclesFromWalkable();
+            }
+            case 1 -> { // 이동 불가 칠하기
+                boolean before = walkableGrid[row][col];
+                walkableGrid[row][col] = false;
+                if (!dragging) paintState = 0;
+                if (before != walkableGrid[row][col]) rebuildObstaclesFromWalkable();
+                // 벽으로 칠하면 해당 타일의 스폰은 제거
+                removeSpawnTile(redSpawnTiles, col, row);
+                removeSpawnTile(blueSpawnTiles, col, row);
+                recomputeSpawnZones();
+            }
+            case 2 -> { // RED 스폰 토글
+                toggleSpawnTile(redSpawnTiles, col, row);
+                // 스폰은 항상 walkable
+                if (!walkableGrid[row][col]) {
+                    walkableGrid[row][col] = true;
+                    rebuildObstaclesFromWalkable();
+                }
+                // 다른 팀 스폰과 겹치지 않게
+                removeSpawnTile(blueSpawnTiles, col, row);
+                recomputeSpawnZones();
+                ensureSpawnZonesWalkable();
+                if (!dragging) paintState = 1;
+            }
+            case 3 -> { // BLUE 스폰 토글
+                toggleSpawnTile(blueSpawnTiles, col, row);
+                if (!walkableGrid[row][col]) {
+                    walkableGrid[row][col] = true;
+                    rebuildObstaclesFromWalkable();
+                }
+                removeSpawnTile(redSpawnTiles, col, row);
+                recomputeSpawnZones();
+                ensureSpawnZonesWalkable();
+                if (!dragging) paintState = 1;
+            }
+        }
+    }
+
+    private boolean isSpawnTile(java.util.List<int[]> list, int col, int row) {
+        if (list == null) return false;
+        for (int[] t : list) {
+            if (t[0] == col && t[1] == row) return true;
+        }
+        return false;
+    }
+
+    private void toggleSpawnTile(java.util.List<int[]> list, int col, int row) {
+        if (isSpawnTile(list, col, row)) {
+            removeSpawnTile(list, col, row);
+        } else {
+            list.add(new int[]{col, row});
+        }
+    }
+
+    private void removeSpawnTile(java.util.List<int[]> list, int col, int row) {
+        if (list == null) return;
+        list.removeIf(t -> t[0] == col && t[1] == row);
+    }
+
+    private void recomputeSpawnZones() {
+        redSpawnZone = computeSpawnZoneFromTiles(redSpawnTiles);
+        blueSpawnZone = computeSpawnZoneFromTiles(blueSpawnTiles);
+    }
+
+    private Rectangle computeSpawnZoneFromTiles(java.util.List<int[]> tiles) {
+        if (tiles == null || tiles.isEmpty()) return null;
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+        for (int[] t : tiles) {
+            minX = Math.min(minX, t[0]);
+            minY = Math.min(minY, t[1]);
+            maxX = Math.max(maxX, t[0]);
+            maxY = Math.max(maxY, t[1]);
+        }
+        return new Rectangle(minX * TILE_SIZE, minY * TILE_SIZE, (maxX - minX + 1) * TILE_SIZE, (maxY - minY + 1) * TILE_SIZE);
+    }
+
+    private void rebuildObstaclesFromWalkable() {
+        obstacles.clear();
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                if (!walkableGrid[r][c]) {
+                    obstacles.add(new Rectangle(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE));
+                }
+            }
+        }
+    }
+
+    /**
+     * 편집된 맵을 JSON 파일로 저장 (assets/maps/<mapName>_edited.json)
+     */
+    private void saveEditedMap() {
+        if (walkableGrid == null) {
+            appendChatMessage("[에디터] 저장 실패: walkableGrid 없음");
+            return;
+        }
+        String fileName = (currentMapName != null && !currentMapName.isEmpty() ? currentMapName : "map") + "_edited.json";
+        File dir = new File("assets" + File.separator + "maps");
+        if (!dir.exists()) dir.mkdirs();
+        File outFile = new File(dir, fileName);
+        try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile), java.nio.charset.StandardCharsets.UTF_8))) {
+            bw.write(generateEditedMapJson());
+            bw.flush();
+            appendChatMessage("[에디터] 저장 완료: " + outFile.getPath());
+        } catch (Exception ex) {
+            appendChatMessage("[에디터] 저장 실패: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * 현재 walkableGrid와 스폰 타일을 obstacles 기반 JSON으로 직렬화
+     */
+    private String generateEditedMapJson() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"meta\": {\n");
+        sb.append("    \"map_pixel_size\": { \"w\": ").append(mapWidth).append(", \"h\": ").append(mapHeight).append(" },\n");
+        sb.append("    \"tile_size\": ").append(TILE_SIZE).append("\n");
+        sb.append("  },\n");
+        // obstacles: walkable == false 타일
+        sb.append("  \"obstacles\": [\n");
+        int count = 0;
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                if (!walkableGrid[r][c]) {
+                    if (count > 0) sb.append(",\n");
+                    sb.append("    { \"x\": ").append(c).append(", \"y\": ").append(r).append(" }");
+                    count++;
+                }
+            }
+        }
+        sb.append("\n  ],\n");
+        // spawns
+        sb.append("  \"spawns\": {\n");
+        // red
+        sb.append("    \"red\": { \"tiles\": [");
+        if (redSpawnTiles != null && !redSpawnTiles.isEmpty()) {
+            for (int i = 0; i < redSpawnTiles.size(); i++) {
+                int[] t = redSpawnTiles.get(i);
+                if (i > 0) sb.append(", ");
+                sb.append("{ \"x\": ").append(t[0]).append(", \"y\": ").append(t[1]).append(" }");
+            }
+        }
+        sb.append("] },\n");
+        // blue
+        sb.append("    \"blue\": { \"tiles\": [");
+        if (blueSpawnTiles != null && !blueSpawnTiles.isEmpty()) {
+            for (int i = 0; i < blueSpawnTiles.size(); i++) {
+                int[] t = blueSpawnTiles.get(i);
+                if (i > 0) sb.append(", ");
+                sb.append("{ \"x\": ").append(t[0]).append(", \"y\": ").append(t[1]).append(" }");
+            }
+        }
+        sb.append("] }\n");
+        sb.append("  }\n");
+        sb.append("}\n");
+        return sb.toString();
+    }
+    
+    /**
+     * 기본 공격 사용 (좌클릭)
+     * targetX, targetY는 이미 맵 좌표입니다.
+     */
+    private void useBasicAttack(int targetX, int targetY) {
+        if (abilities != null && abilities.length > 0) {
+            Ability basicAttack = abilities[0];
+            if (basicAttack.canUse()) {
+                basicAttack.activate();
+                // targetX, targetY는 이미 맵 좌표
+                shootMissile(targetX, targetY);
+                
+                // 서버에 스킬 사용 알림
+                sendSkillUse(0, "BASIC");
+                // 로컬 이펙트 추가 (즉발형은 짧게)
+                addLocalEffect(basicAttack);
+            }
+        }
+    }
+    
+    /**
+     * 전술 스킬 사용 (E키)
+     */
+    private void useTacticalSkill() {
+        if (abilities != null && abilities.length > 1) {
+            Ability tactical = abilities[1];
+            if (tactical.canUse()) {
+                tactical.activate();
+                appendChatMessage("[스킬] " + tactical.getName() + " 사용!");
+                
+                // 서버에 스킬 사용 알림
+                sendSkillUse(1, "TACTICAL");
+                
+                // 스킬별 효과 적용 (향후 구현)
+                applySkillEffect(tactical);
+                addLocalEffect(tactical);
+                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                    ravenDashRemaining = Math.max(ravenDashRemaining, tactical.getActiveDuration());
+                }
+            }
+        }
+    }
+    
+    /**
+     * 궁극기 사용 (R키)
+     */
+    private void useUltimateSkill() {
+        if (abilities != null && abilities.length > 2) {
+            Ability ultimate = abilities[2];
+            if (ultimate.canUse()) {
+                ultimate.activate();
+                appendChatMessage("[궁극기] " + ultimate.getName() + " 발동!");
+                
+                // 서버에 스킬 사용 알림
+                sendSkillUse(2, "ULTIMATE");
+                
+                // 스킬별 효과 적용 (향후 구현)
+                applySkillEffect(ultimate);
+                addLocalEffect(ultimate);
+                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                    ravenOverchargeRemaining = ultimate.getActiveDuration();
+                    missileSpeedMultiplier = 1.8f;
+                    if (abilities != null && abilities.length > 0) {
+                        abilities[0].setCooldownMultiplier(0.35f);
+                    }
+                }
+            }
+        }
+    }
+
+    private void addLocalEffect(Ability ability) {
+        float dur = ability.getActiveDuration() > 0 ? ability.getActiveDuration() : 0.4f;
+        myEffects.add(new ActiveEffect(ability.id, ability.getType().name(), dur));
+        // === 구조화된 SkillEffect 등록 ===
+        // ability.id 에 따라 전용 클래스 이펙트를 추가하여 기존 단순 링보다 풍부한 표현 제공
+        // 추후 신규 캐릭터 추가 시 여기 if 블록에 대응 클래스만 연결하면 유지보수 용이.
+        String id = ability.id;
+        if ("piper_mark".equals(id)) {
+            skillEffects.addSelf(new PiperMarkEffect(dur));
+        } else if ("piper_thermal".equals(id)) {
+            skillEffects.addSelf(new PiperThermalEffect(dur));
+        } else if ("raven_dash".equals(id)) {
+            skillEffects.addSelf(new RavenDashEffect(dur));
+        } else if ("raven_overcharge".equals(id)) {
+            skillEffects.addSelf(new RavenOverchargeEffect(dur));
+        } else if ("gen_aura".equals(id)) {
+            skillEffects.addSelf(new GeneralAuraEffect(dur));
+        } else if ("gen_strike".equals(id)) {
+            skillEffects.addSelf(new GeneralStrikeEffect(dur));
+        } else if ("bull_cover".equals(id)) {
+            skillEffects.addSelf(new BulldogCoverEffect(dur));
+        } else if ("bull_barrage".equals(id)) {
+            skillEffects.addSelf(new BulldogBarrageEffect(dur));
+        } else if ("wild_breach".equals(id)) {
+            skillEffects.addSelf(new WildcatBreachEffect(dur));
+        } else if ("wild_berserk".equals(id)) {
+            skillEffects.addSelf(new WildcatBerserkEffect(dur));
+        } else if ("ghost_cloak".equals(id)) {
+            skillEffects.addSelf(new GhostCloakEffect(dur));
+        } else if ("ghost_nullify".equals(id)) {
+            skillEffects.addSelf(new GhostNullifyEffect(dur));
+        } else if ("skull_adrenaline".equals(id)) {
+            skillEffects.addSelf(new SkullAdrenalineEffect(dur));
+        } else if ("skull_ammo".equals(id)) {
+            skillEffects.addSelf(new SkullAmmoEffect(dur));
+        } else if ("steam_emp".equals(id)) {
+            skillEffects.addSelf(new SteamEmpEffect(dur));
+        } else if ("steam_reset".equals(id)) {
+            skillEffects.addSelf(new SteamResetEffect(dur));
+        } else if ("tech_mine".equals(id)) {
+            skillEffects.addSelf(new TechMineEffect(dur));
+        } else if ("tech_turret".equals(id)) {
+            skillEffects.addSelf(new TechTurretEffect(dur));
+        } else if ("sage_heal".equals(id)) {
+            skillEffects.addSelf(new SageHealEffect(dur));
+        } else if ("sage_revive".equals(id)) {
+            skillEffects.addSelf(new SageReviveEffect(dur));
+        }
+    }
+    
+    /**
+     * 스킬 효과 적용 (캐릭터 일부 구현)
+     */
+    private void applySkillEffect(Ability ability) {
+        // Piper: 마킹/열감지 구현 (미니맵 가시성 확장)
+        if ("piper".equalsIgnoreCase(selectedCharacter)) {
+            if ("piper_mark".equalsIgnoreCase(ability.id)) {
+                piperMarkRemaining = ability.getActiveDuration();
+                appendChatMessage("[Piper] 적 표시 활성화 (미니맵 시야 확장)");
+                teamMarkRemaining = Math.max(teamMarkRemaining, piperMarkRemaining); // 팀 공유
+            } else if ("piper_thermal".equalsIgnoreCase(ability.id)) {
+                piperThermalRemaining = ability.getActiveDuration();
+                appendChatMessage("[Piper] 열감지 활성화 (전체 적 표시)");
+                teamThermalRemaining = Math.max(teamThermalRemaining, piperThermalRemaining); // 팀 공유
+            }
+        }
+        System.out.println("스킬 효과: " + ability.getName() + " (ID: " + ability.id + ")");
+    }
+    
+    /**
+     * 서버에 스킬 사용 알림
+     */
+    private void sendSkillUse(int skillIndex, String skillType) {
+        if (out != null) {
+            try {
+                // abilityId,type,duration
+                Ability ability = (abilities != null && skillIndex < abilities.length) ? abilities[skillIndex] : null;
+                float dur = (ability != null) ? ability.getActiveDuration() : 0f;
+                String abilityId = (ability != null) ? ability.id : ("skill" + skillIndex);
+                out.writeUTF("SKILL:" + abilityId + "," + skillType + "," + dur);
+                out.flush();
+            } catch (IOException ex) {
+                appendChatMessage("스킬 전송 실패: " + ex.getMessage());
+            }
         }
     }
     
@@ -650,6 +2477,9 @@ public class GamePanel extends JFrame implements KeyListener {
             selectedCharacter = newCharacter;
             currentCharacterData = CharacterData.getById(selectedCharacter);
             
+            // 스킬 재로드
+            abilities = CharacterData.createAbilities(selectedCharacter);
+            
             // 서버에 캐릭터 변경 알림
             if (out != null) {
                 try {
@@ -659,6 +2489,8 @@ public class GamePanel extends JFrame implements KeyListener {
                     ex.printStackTrace();
                 }
             }
+            
+            appendChatMessage("캐릭터를 " + currentCharacterData.name + "으로 변경했습니다.");
             
             // HUD에 캐릭터 정보 표시
             canvas.repaint();

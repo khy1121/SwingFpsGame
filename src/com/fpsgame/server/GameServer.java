@@ -1,5 +1,7 @@
 package com.fpsgame.server;
 
+import com.fpsgame.common.Ability;
+import com.fpsgame.common.CharacterData;
 import com.fpsgame.common.GameConstants;
 import com.fpsgame.common.Protocol;
 import java.io.*;
@@ -217,6 +219,13 @@ public class GameServer {
                     broadcast("SHOOT:" + playerName + "," + data, playerName);
                     break;
 
+                case "SKILL":
+                    // data format from client: abilityId,type,duration
+                    // Broadcast to others with player name prefixed
+                    // SKILL:playerName,abilityId,type,duration
+                    broadcast("SKILL:" + playerName + "," + data, playerName);
+                    break;
+
                 case "HIT":
                     String hitPlayer = data;
                     ClientHandler target = clients.get(hitPlayer);
@@ -226,7 +235,8 @@ public class GameServer {
                         if (now < target.spawnProtectedUntil || target.playerInfo.hp <= 0 || this.playerInfo.hp <= 0) {
                             break;
                         }
-                        target.playerInfo.hp -= GameConstants.MISSILE_DAMAGE;
+                        int dmg = resolveBasicDamage(this.playerInfo.characterId);
+                        target.playerInfo.hp -= dmg;
                         if (target.playerInfo.hp <= 0) {
                             target.playerInfo.hp = 0;
                             sendMessage("KILL:" + hitPlayer);
@@ -249,7 +259,8 @@ public class GameServer {
                         long now = System.currentTimeMillis();
                         // 스폰 보호 중이거나 이미 사망 상태면 무시
                         if (now < spawnProtectedUntil || playerInfo.hp <= 0) break;
-                        playerInfo.hp -= GameConstants.MISSILE_DAMAGE;
+                        int dmg = resolveBasicDamage(shooter != null ? shooter.playerInfo.characterId : null);
+                        playerInfo.hp -= dmg;
                         if (playerInfo.hp <= 0) {
                             playerInfo.hp = 0;
                             if (shooter != null && shooter.playerInfo != null) {
@@ -320,6 +331,22 @@ public class GameServer {
                 if (socket != null && !socket.isClosed()) socket.close();
             } catch (IOException ignored) {}
         }
+    }
+    /**
+     * 기본 공격 데미지: 캐릭터 첫 번째 Ability.damage 사용 (없으면 기본 상수)
+     */
+    private int resolveBasicDamage(String characterId) {
+        if (characterId == null) return GameConstants.MISSILE_DAMAGE;
+        try {
+            Ability[] abs = CharacterData.createAbilities(characterId);
+            if (abs != null && abs.length > 0) {
+                float dmg = abs[0].damage;
+                if (dmg <= 0) return GameConstants.MISSILE_DAMAGE;
+                // 서버는 정수 HP 관리 - 반올림
+                return Math.max(1, Math.round(dmg));
+            }
+        } catch (Exception ignored) {}
+        return GameConstants.MISSILE_DAMAGE;
     }
     
     public static void main(String[] args) {
