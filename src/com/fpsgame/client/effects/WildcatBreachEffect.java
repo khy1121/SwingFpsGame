@@ -2,16 +2,24 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Wildcat 전술 "돌파": 전방 방향 잔상 삼각 (단순) */
 public class WildcatBreachEffect extends SkillEffect {
-    public WildcatBreachEffect(float duration) { super("wild_breach", duration); }
+
+    public WildcatBreachEffect(float duration) {
+        super("wild_breach", duration);
+    }
 
     @Override
     public void drawSelf(Graphics2D g2d, int x, int y) {
-        int alpha = (int)(200 * (remaining / duration)); alpha = Math.max(50, alpha);
-        int len = 36;
-        Polygon p = new Polygon(new int[]{x, x - 14, x + 14}, new int[]{y - len, y, y}, 3);
-        g2d.setColor(new Color(255, 120, 80, alpha));
-        g2d.drawPolygon(p);
+        // 돌진 이펙트 (잔상 느낌)
+        g2d.setColor(new Color(200, 200, 200, 150));
+        g2d.setStroke(new BasicStroke(2f));
+
+        // 뒤로 흐르는 선
+        g2d.drawLine(x - 20, y - 10, x - 40, y - 20);
+        g2d.drawLine(x - 20, y + 10, x - 40, y + 20);
+        g2d.drawLine(x - 25, y, x - 50, y);
+
+        g2d.setColor(Color.WHITE);
+        g2d.drawString(">>>", x - 10, y + 30);
     }
 }

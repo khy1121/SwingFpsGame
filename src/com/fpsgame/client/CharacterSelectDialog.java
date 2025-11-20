@@ -75,7 +75,7 @@ public class CharacterSelectDialog extends JDialog {
         confirmButton.setFont(koreanBold);
         confirmButton.setPreferredSize(new Dimension(140, 40));
         confirmButton.setBackground(new Color(67, 181, 129));
-        confirmButton.setForeground(Color.WHITE);
+        confirmButton.setForeground(Color.BLACK);
         confirmButton.setFocusPainted(false);
         confirmButton.addActionListener(e -> {
             if (selectedCharacterId != null) {
@@ -90,7 +90,7 @@ public class CharacterSelectDialog extends JDialog {
         cancelButton.setFont(koreanBold);
         cancelButton.setPreferredSize(new Dimension(140, 40));
         cancelButton.setBackground(new Color(88, 91, 97));
-        cancelButton.setForeground(Color.WHITE);
+        cancelButton.setForeground(Color.BLACK);
         cancelButton.setFocusPainted(false);
         cancelButton.addActionListener(e -> dispose());
         

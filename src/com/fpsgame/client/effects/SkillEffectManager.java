@@ -20,6 +20,7 @@ import java.util.*;
 public class SkillEffectManager {
     private final List<SkillEffect> selfEffects = new ArrayList<>();
     private final Map<String, List<SkillEffect>> byPlayer = new HashMap<>();
+    private final Map<Integer, List<SkillEffect>> byObject = new HashMap<>();
 
     /** 로컬 플레이어 효과 등록 */
     public void addSelf(SkillEffect fx) { if (fx != null) selfEffects.add(fx); }
@@ -28,6 +29,12 @@ public class SkillEffectManager {
     public void addForPlayer(String player, SkillEffect fx) {
         if (player == null || fx == null) return;
         byPlayer.computeIfAbsent(player, k -> new ArrayList<>()).add(fx);
+    }
+
+    /** 특정 오브젝트(터렛 등) 효과 등록 */
+    public void addForObject(int objectId, SkillEffect fx) {
+        if (fx == null) return;
+        byObject.computeIfAbsent(objectId, k -> new ArrayList<>()).add(fx);
     }
 
     /** 프레임 업데이트: 모든 이펙트 수명 감소 & 만료 제거 */
@@ -48,6 +55,15 @@ public class SkillEffectManager {
                 }
             }
         }
+        if (!byObject.isEmpty()) {
+            for (List<SkillEffect> list : byObject.values()) {
+                for (Iterator<SkillEffect> it = list.iterator(); it.hasNext();) {
+                    SkillEffect fx = it.next();
+                    fx.update(dt);
+                    if (fx.isExpired()) it.remove();
+                }
+            }
+        }
     }
 
     /** 로컬 이펙트 그리기 */
@@ -60,5 +76,12 @@ public class SkillEffectManager {
         List<SkillEffect> list = byPlayer.get(player);
         if (list == null || list.isEmpty()) return;
         for (SkillEffect fx : list) fx.drawForPlayer(g2d, x, y);
+    }
+
+    /** 특정 오브젝트(터렛 등) 이펙트 그리기 */
+    public void drawForObject(int objectId, Graphics2D g2d, int x, int y) {
+        List<SkillEffect> list = byObject.get(objectId);
+        if (list == null || list.isEmpty()) return;
+        for (SkillEffect fx : list) fx.drawSelf(g2d, x, y);
     }
 }

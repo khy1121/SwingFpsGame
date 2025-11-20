@@ -2,18 +2,25 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Steam 궁극 "전술 리셋": 순간 위치 변경 강조하는 희미한 파란 회전 아크 */
 public class SteamResetEffect extends SkillEffect {
-    public SteamResetEffect(float duration) { super("steam_reset", duration); }
+
+    public SteamResetEffect(float duration) {
+        super("steam_reset", duration);
+    }
 
     @Override
     public void drawSelf(Graphics2D g2d, int x, int y) {
-        float e = (duration - remaining);
-        int r = 30;
-        int alpha = (int)(150 * (remaining / duration)); alpha = Math.max(50, alpha);
-        int arcStart = (int)((e * 300) % 360);
-        g2d.setStroke(new BasicStroke(4f));
-        g2d.setColor(new Color(120, 200, 255, alpha));
-        g2d.drawArc(x - r, y - r, r * 2, r * 2, arcStart, 90);
+        // 녹색 회복/리셋 느낌
+        g2d.setColor(new Color(0, 255, 100, 150));
+        g2d.setStroke(new BasicStroke(3f));
+
+        // 위로 올라가는 화살표들
+        int offset = (int) ((duration - remaining) * 20) % 20;
+        g2d.drawLine(x - 10, y + 10 - offset, x, y - offset);
+        g2d.drawLine(x + 10, y + 10 - offset, x, y - offset);
+
+        g2d.setColor(Color.GREEN);
+        g2d.setFont(new Font("Arial", Font.BOLD, 12));
+        g2d.drawString("RESET", x - 20, y - 20);
     }
 }

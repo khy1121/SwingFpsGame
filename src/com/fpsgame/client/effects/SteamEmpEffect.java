@@ -2,19 +2,26 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Steam 전술 "EMP": 전자 펄스 느낌 파란/하양 이중 링 */
 public class SteamEmpEffect extends SkillEffect {
-    public SteamEmpEffect(float duration) { super("steam_emp", duration); }
+
+    public SteamEmpEffect(float duration) {
+        super("steam_emp", duration);
+    }
 
     @Override
     public void drawSelf(Graphics2D g2d, int x, int y) {
-        float e = (duration - remaining);
-        int r = 32 + (int)(Math.sin(e * 8) * 4);
-        int alpha = (int)(160 * (remaining / duration)); alpha = Math.max(60, alpha);
-        g2d.setStroke(new BasicStroke(3f));
-        g2d.setColor(new Color(90, 180, 255, alpha));
-        g2d.drawOval(x - r, y - r, r * 2, r * 2);
-        g2d.setColor(new Color(200, 230, 255, alpha/2));
-        g2d.drawOval(x - r - 6, y - r - 6, (r + 6) * 2, (r + 6) * 2);
+        // 푸른 전자기 파동
+        float progress = 1.0f - (remaining / duration);
+        int radius = (int) (20 + progress * 150);
+
+        g2d.setColor(new Color(0, 200, 255, (int) (200 * (remaining / duration))));
+        g2d.setStroke(new BasicStroke(2f));
+        g2d.drawOval(x - radius, y - radius, radius * 2, radius * 2);
+
+        // 번개 효과 (랜덤 라인)
+        g2d.setColor(Color.CYAN);
+        if (Math.random() > 0.5) {
+            g2d.drawLine(x, y, x + (int) (Math.random() * 40 - 20), y + (int) (Math.random() * 40 - 20));
+        }
     }
 }

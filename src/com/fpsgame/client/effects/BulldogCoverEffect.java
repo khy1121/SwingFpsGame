@@ -2,17 +2,25 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Bulldog 전술 "엄폐" 효과: 보호막 느낌의 반투명 청록 육중 링 */
 public class BulldogCoverEffect extends SkillEffect {
-    public BulldogCoverEffect(float duration) { super("bull_cover", duration); }
+
+    public BulldogCoverEffect(float duration) {
+        super("bull_cover", duration);
+    }
 
     @Override
     public void drawSelf(Graphics2D g2d, int x, int y) {
-        float ratio = remaining / duration;
-        int r = 42;
-        int alpha = (int)(160 * ratio); alpha = Math.max(70, alpha);
-        g2d.setStroke(new BasicStroke(5f));
-        g2d.setColor(new Color(80, 200, 190, alpha));
-        g2d.drawOval(x - r, y - r, r * 2, r * 2);
+        // 방패 모양의 오라
+        g2d.setColor(new Color(100, 100, 255, 100));
+        g2d.setStroke(new BasicStroke(3f));
+        g2d.drawArc(x - 30, y - 30, 60, 60, 0, 360);
+
+        g2d.setColor(new Color(50, 50, 200, 50));
+        g2d.fillArc(x - 30, y - 30, 60, 60, 0, 360);
+
+        // 텍스트
+        g2d.setColor(Color.WHITE);
+        g2d.setFont(new Font("Arial", Font.BOLD, 12));
+        g2d.drawString("SHIELD", x - 20, y - 35);
     }
 }

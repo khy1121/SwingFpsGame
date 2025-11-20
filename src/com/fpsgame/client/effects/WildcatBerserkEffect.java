@@ -2,19 +2,26 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Wildcat 궁극 "광폭화": 붉은 이중 펄스 링 */
 public class WildcatBerserkEffect extends SkillEffect {
-    public WildcatBerserkEffect(float duration) { super("wild_berserk", duration); }
+
+    public WildcatBerserkEffect(float duration) {
+        super("wild_berserk", duration);
+    }
 
     @Override
     public void drawSelf(Graphics2D g2d, int x, int y) {
-        float e = (duration - remaining);
-        int r = 34 + (int)(Math.sin(e * 7) * 6);
-        int alpha = (int)(180 * (remaining / duration)); alpha = Math.max(70, alpha);
-        g2d.setStroke(new BasicStroke(3f));
-        g2d.setColor(new Color(255, 70, 70, alpha));
-        g2d.drawOval(x - r, y - r, r * 2, r * 2);
-        g2d.setColor(new Color(180, 30, 30, alpha/2));
-        g2d.drawOval(x - r - 8, y - r - 8, (r + 8) * 2, (r + 8) * 2);
+        // 붉은 오라
+        g2d.setColor(new Color(255, 0, 0, 100));
+        g2d.fillOval(x - 25, y - 25, 50, 50);
+
+        // 눈 강조
+        g2d.setColor(Color.RED);
+        g2d.fillOval(x - 10, y - 5, 8, 8);
+        g2d.fillOval(x + 2, y - 5, 8, 8);
+
+        // 텍스트
+        g2d.setColor(Color.RED);
+        g2d.setFont(new Font("Arial", Font.BOLD, 14));
+        g2d.drawString("RAGE", x - 20, y - 30);
     }
 }
