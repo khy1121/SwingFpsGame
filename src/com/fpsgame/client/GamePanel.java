@@ -1496,9 +1496,8 @@ public class GamePanel extends JFrame implements KeyListener {
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         // 기본 선호 순서
         names.add("map");
-        names.add("airport");
+        names.add("map2");
         names.add("terminal");
-        names.add("garden");
         names.add("village");
 
         File dir = new File("assets" + File.separator + "maps");
