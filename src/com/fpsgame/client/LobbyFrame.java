@@ -96,7 +96,7 @@ public class LobbyFrame extends JFrame {
     private JLabel[] redSlots = new JLabel[5];
     private JLabel[] blueSlots = new JLabel[5];
 
-    private String selectedMap = "terminal";
+    private String selectedMap = "map";
 
     private Socket socket;
     private DataOutputStream out;
@@ -192,17 +192,20 @@ public class LobbyFrame extends JFrame {
         JPanel centerPanel = new JPanel(new BorderLayout());
         centerPanel.setBackground(panelBg);
 
-        // 맵 선택 패널
-        JPanel mapSelectPanel = new JPanel(new GridLayout(1, 3, 15, 0));
+        // 맵 선택 패널 (4개의 맵 카드)
+        JPanel mapSelectPanel = new JPanel(new GridLayout(1, 4, 15, 0));
         mapSelectPanel.setBackground(panelBg);
         mapSelectPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
 
-        String[] maps = { "Terminal", "Neon City", "Forest Outpost" };
-        String[] mapIds = { "terminal", "neonCity", "ForestOutpost" };
+        String[] maps = { "Map", "Map 2", "Map 3", "Village" };
+        String[] mapIds = { "map", "map2", "map3", "village" };
+        String[] mapDescs = { "도로와 벽돌로 이루어진 맵입니다. 장거리 교전에 유의하세요. (기본 스타일). ", "통로가 많은 맵이니 뒤를 조심하세요",
+                "섬이 다양하고 길이 좁으니, 근접전이 많습니다.", "기본맵과 동일한 구조입니다. " };
 
         for (int i = 0; i < maps.length; i++) {
             final String mapId = mapIds[i];
-            JPanel mapCard = createMapCard(maps[i], mapId, koreanFont, slotBg);
+            final String mapDesc = mapDescs[i];
+            JPanel mapCard = createMapCard(maps[i], mapId, mapDesc, koreanFont, slotBg);
             mapSelectPanel.add(mapCard);
         }
 
@@ -412,27 +415,65 @@ public class LobbyFrame extends JFrame {
         setJMenuBar(menuBar);
     }
 
-    private JPanel createMapCard(String mapName, String mapId, Font font, Color bgColor) {
+    private JPanel createMapCard(String mapName, String mapId, String mapDesc, Font font, Color bgColor) {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(bgColor);
         card.setBorder(new CompoundBorder(
                 new LineBorder(new Color(80, 82, 88), 1),
                 new EmptyBorder(10, 10, 10, 10)));
 
-        // 맵 이미지 영역 (간단한 플레이스홀더)
-        JPanel imagePanel = new JPanel();
+        // 맵 이미지 영역
+        JPanel imagePanel = new JPanel(new BorderLayout());
         imagePanel.setBackground(new Color(45, 47, 53));
-        imagePanel.setPreferredSize(new Dimension(0, 180));
+        imagePanel.setPreferredSize(new Dimension(0, 150));
         imagePanel.setBorder(new LineBorder(new Color(60, 62, 68), 1));
+
+        // 맵 이미지 로드 시도
+        try {
+            String imagePath = "assets" + File.separator + "maps" + File.separator + mapId + ".png";
+            File imageFile = new File(imagePath);
+
+            if (imageFile.exists()) {
+                ImageIcon originalIcon = new ImageIcon(imagePath);
+                Image scaledImage = originalIcon.getImage().getScaledInstance(280, 150, Image.SCALE_SMOOTH);
+                JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
+                imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                imagePanel.add(imageLabel, BorderLayout.CENTER);
+            } else {
+                // 이미지가 없으면 플레이스홀더 표시
+                JLabel placeholder = new JLabel("No Image", SwingConstants.CENTER);
+                placeholder.setForeground(Color.GRAY);
+                placeholder.setFont(font);
+                imagePanel.add(placeholder, BorderLayout.CENTER);
+            }
+        } catch (Exception e) {
+            // 이미지 로드 실패 시 플레이스홀더
+            JLabel placeholder = new JLabel("Image Load Failed", SwingConstants.CENTER);
+            placeholder.setForeground(Color.GRAY);
+            placeholder.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
+            imagePanel.add(placeholder, BorderLayout.CENTER);
+        }
+
+        // 하단 정보 패널 (맵 이름 + 설명)
+        JPanel infoPanel = new JPanel(new BorderLayout(0, 3));
+        infoPanel.setBackground(bgColor);
+        infoPanel.setBorder(new EmptyBorder(8, 5, 8, 5));
 
         // 맵 이름 레이블
         JLabel nameLabel = new JLabel(mapName, SwingConstants.CENTER);
-        nameLabel.setFont(font);
-        nameLabel.setForeground(Color.BLACK);
-        nameLabel.setBorder(new EmptyBorder(8, 0, 8, 0));
+        nameLabel.setFont(new Font("맑은 고딕", Font.BOLD, 14));
+        nameLabel.setForeground(Color.WHITE);
+
+        // 맵 설명 레이블
+        JLabel descLabel = new JLabel(mapDesc, SwingConstants.CENTER);
+        descLabel.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
+        descLabel.setForeground(Color.LIGHT_GRAY);
+
+        infoPanel.add(nameLabel, BorderLayout.NORTH);
+        infoPanel.add(descLabel, BorderLayout.CENTER);
 
         card.add(imagePanel, BorderLayout.CENTER);
-        card.add(nameLabel, BorderLayout.SOUTH);
+        card.add(infoPanel, BorderLayout.SOUTH);
 
         // 클릭 이벤트
         MouseAdapter clickHandler = new MouseAdapter() {
@@ -440,6 +481,20 @@ public class LobbyFrame extends JFrame {
             public void mouseClicked(MouseEvent e) {
                 selectedMap = mapId;
                 appendChat("맵 선택: " + mapName);
+            }
+
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                card.setBorder(new CompoundBorder(
+                        new LineBorder(new Color(88, 101, 242), 2),
+                        new EmptyBorder(9, 9, 9, 9)));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                card.setBorder(new CompoundBorder(
+                        new LineBorder(new Color(80, 82, 88), 1),
+                        new EmptyBorder(10, 10, 10, 10)));
             }
         };
         card.addMouseListener(clickHandler);

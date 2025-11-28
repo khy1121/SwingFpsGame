@@ -176,6 +176,10 @@ public class GamePanel extends JFrame implements KeyListener {
     private String centerMessage = "";
     private long centerMessageEndTime = 0;
 
+    // 캐릭터 선택 제한 관련 변수
+    private boolean hasChangedCharacterInRound = false;
+    private static final long CHARACTER_CHANGE_TIME_LIMIT = 10000; // 10초
+
     class PlacedObjectClient {
         int id;
         String type; // "tech_mine", "tech_turret"
@@ -1273,12 +1277,12 @@ public class GamePanel extends JFrame implements KeyListener {
             @Override
             public void windowClosing(WindowEvent e) {
                 try {
-                    if (out != null) {
+                    if (out != null && socket != null && !socket.isClosed()) {
                         out.writeUTF("QUIT");
                         out.flush();
                     }
                 } catch (IOException ex) {
-                    ex.printStackTrace();
+                    // 소켓이 이미 닫혔을 수 있음 - 무시
                 }
                 disconnect();
             }
@@ -1497,7 +1501,7 @@ public class GamePanel extends JFrame implements KeyListener {
         // 기본 선호 순서
         names.add("map");
         names.add("map2");
-        names.add("terminal");
+        names.add("map3");
         names.add("village");
 
         File dir = new File("assets" + File.separator + "maps");
@@ -2753,25 +2757,59 @@ public class GamePanel extends JFrame implements KeyListener {
             }
 
             case "ROUND_START": {
-                // ROUND_START:roundNumber
-                roundCount = Integer.parseInt(data);
-                roundState = RoundState.WAITING;
-                roundStartTime = System.currentTimeMillis();
-                centerMessage = "Round " + roundCount + " Ready";
-                centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+                // ROUND_START:roundNumber,mapId
+                String[] roundParts = data.split(",");
+                if (roundParts.length > 0) {
+                    roundCount = Integer.parseInt(roundParts[0]);
 
-                // 라운드 시작 시 오브젝트 및 효과 초기화
-                placedObjects.clear();
-                strikeMarkers.clear();
-                if (effectsByPlayer != null) {
-                    effectsByPlayer.clear();
+                    // 맵 ID가 포함되어 있으면 새 맵 로드
+                    if (roundParts.length > 1) {
+                        String newMapId = roundParts[1];
+                        if (!newMapId.equals(currentMapName)) {
+                            currentMapName = newMapId;
+                            loadMap(newMapId);
+                            appendChatMessage("[맵] " + newMapId + " 맵으로 변경되었습니다!");
+                        }
+                    }
+                    roundState = RoundState.WAITING;
+                    roundStartTime = System.currentTimeMillis();
+                    centerMessage = "Round " + roundCount + " Ready";
+                    centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+
+                    // 라운드 시작 시 캐릭터 변경 플래그 초기화
+                    hasChangedCharacterInRound = false;
+
+                    // 라운드 시작 시 오브젝트 및 효과 초기화
+                    placedObjects.clear();
+                    strikeMarkers.clear();
+                    if (effectsByPlayer != null) {
+                        effectsByPlayer.clear();
+                    }
+                    // skillEffects는 별도 초기화 필요 시 추가
+
+                    // 리스폰
+                    respawn();
+
+                    appendChatMessage("[라운드] Round " + roundCount + " 시작!");
                 }
-                // skillEffects는 별도 초기화 필요 시 추가
+                break;
+            }
 
-                // 리스폰
-                respawn();
+            case "CHARACTER_SELECT": {
+                // CHARACTER_SELECT:playerName,characterId
+                String[] cs = data.split(",");
+                if (cs.length >= 2) {
+                    String pName = cs[0];
+                    String charId = cs[1];
 
-                appendChatMessage("[라운드] Round " + roundCount + " 시작!");
+                    if (pName.equals(playerName)) {
+                        selectedCharacter = charId;
+                        hasChangedCharacterInRound = true; // 내 캐릭터 변경 기록
+                        appendChatMessage("[시스템] 캐릭터를 " + charId + "(으)로 변경했습니다.");
+                    } else {
+                        appendChatMessage("[시스템] " + pName + "님이 캐릭터를 변경했습니다.");
+                    }
+                }
                 break;
             }
 
@@ -2784,16 +2822,14 @@ public class GamePanel extends JFrame implements KeyListener {
                 appendChatMessage("[게임 종료] " + data + " 팀이 최종 승리했습니다!");
                 appendChatMessage("========================================");
 
-                // 5초 후 로비로 복귀 (옵션)
+                // 5초 후 로비로 복귀
                 javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> {
-                    // 로비로 복귀 로직 (현재는 메시지만)
-                    appendChatMessage("[시스템] 게임이 종료되었습니다.");
+                    returnToLobby();
                 });
                 returnTimer.setRepeats(false);
                 returnTimer.start();
                 break;
             }
-
         }
     }
 
@@ -2810,6 +2846,28 @@ public class GamePanel extends JFrame implements KeyListener {
         } catch (IOException ex) {
             ex.printStackTrace();
         }
+    }
+
+    /**
+     * 로비로 복귀
+     */
+    private void returnToLobby() {
+        // 게임 종료
+        if (timer != null) {
+            timer.stop();
+        }
+        disconnect();
+
+        // 현재 창 닫기 및 로비 열기
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(this);
+            if (window != null) {
+                window.dispose();
+            }
+
+            // 로비 프레임 열기
+            new LobbyFrame(playerName).setVisible(true);
+        });
     }
 
     @Override

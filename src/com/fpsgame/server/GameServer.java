@@ -42,6 +42,10 @@ public class GameServer {
     private boolean roundEnded = false;
     private static final int MAX_WINS = 2; // 3판 2선승
 
+    // 캐릭터 선택 제한 (라운드당 1회, 라운드 시작 10초 이내)
+    private long currentRoundStartTime = 0;
+    private Map<String, Boolean> playerCharacterChanged = new ConcurrentHashMap<>();
+
     /**
      * 설치된 오브젝트 (지뢰, 터렛)
      */
@@ -272,7 +276,30 @@ public class GameServer {
                     break;
 
                 case "CHARACTER_SELECT":
+                    // 라운드 진행 중일 때만 제한 적용 (로비에서는 무제한)
+                    if (currentRoundStartTime > 0) {
+                        long elapsed = System.currentTimeMillis() - currentRoundStartTime;
+                        // 1. 시간 제한 (10초)
+                        if (elapsed > 10000) {
+                            sendMessage("CHAT:[시스템] 라운드 시작 후 10초가 지나 캐릭터를 변경할 수 없습니다.");
+                            break;
+                        }
+                        // 2. 횟수 제한 (라운드당 1회)
+                        if (playerCharacterChanged.containsKey(playerName)) {
+                            sendMessage("CHAT:[시스템] 이번 라운드에 이미 캐릭터를 변경했습니다.");
+                            break;
+                        }
+                        // 변경 기록
+                        playerCharacterChanged.put(playerName, true);
+                    }
+
                     playerInfo.characterId = data;
+
+                    // 변경 성공 알림 (본인 및 타인)
+                    // CHARACTER_SELECT:playerName,characterId
+                    String charSelectMsg = "CHARACTER_SELECT:" + playerName + "," + data;
+                    broadcast(charSelectMsg, null);
+
                     broadcast("CHAT:" + playerName + " 님이 " + com.fpsgame.common.CharacterData.getById(data).name
                             + " 캐릭터를 선택했습니다!", null);
                     broadcastTeamRoster();
@@ -898,13 +925,13 @@ public class GameServer {
             // 게임 리셋은 별도 명령이나 재시작 필요
         } else {
             // 10초 후 다음 라운드
-            broadcast("CHAT:10초 후 다음 라운드가 시작됩니다...", null);
+            broadcast("CHAT:3초 후 다음 라운드가 시작됩니다...", null);
             new Timer().schedule(new TimerTask() {
                 @Override
                 public void run() {
                     startNextRound();
                 }
-            }, 10000);
+            }, 3000);
         }
     }
 
@@ -912,10 +939,18 @@ public class GameServer {
         roundCount++;
         roundEnded = false;
 
+        // 랜덤 맵 선택
+        String[] availableMaps = { "map", "map2", "map3", "village" };
+        String selectedMap = availableMaps[new java.util.Random().nextInt(availableMaps.length)];
+
         // 게임 상태 초기화
         placedObjects.clear();
         activeAuras.clear();
         scheduledStrikes.clear();
+
+        // 캐릭터 변경 제한 초기화
+        playerCharacterChanged.clear();
+        currentRoundStartTime = System.currentTimeMillis();
 
         // 모든 플레이어 부활 및 위치 초기화 (클라이언트가 알아서 하거나 서버가 강제)
         // 여기서는 HP만 채워주고 클라이언트에게 라운드 시작 알림
@@ -926,7 +961,7 @@ public class GameServer {
             }
         }
 
-        broadcast("ROUND_START:" + roundCount, null);
+        broadcast("ROUND_START:" + roundCount + "," + selectedMap, null);
         broadcastTeamRoster(); // 갱신된 정보 전송
     }
 }
