@@ -833,6 +833,11 @@ public class GameServer {
                     for (ClientHandler c : clients.values()) {
                         c.sendMessage(shootMsg);
                     }
+
+                    // 터렛 데미지 적용은 클라이언트의 미사일 충돌(HITME)로 위임
+                    // (즉시 데미지 제거)
+                    broadcastStats(ch.playerName, ch.playerInfo);
+
                     break; // 한 번에 한 명만 공격
                 }
             }
@@ -892,19 +897,25 @@ public class GameServer {
             broadcast("GAME_OVER:" + winTeamName, null);
             // 게임 리셋은 별도 명령이나 재시작 필요
         } else {
-            // 5초 후 다음 라운드
+            // 10초 후 다음 라운드
+            broadcast("CHAT:10초 후 다음 라운드가 시작됩니다...", null);
             new Timer().schedule(new TimerTask() {
                 @Override
                 public void run() {
                     startNextRound();
                 }
-            }, 5000);
+            }, 10000);
         }
     }
 
     private void startNextRound() {
         roundCount++;
         roundEnded = false;
+
+        // 게임 상태 초기화
+        placedObjects.clear();
+        activeAuras.clear();
+        scheduledStrikes.clear();
 
         // 모든 플레이어 부활 및 위치 초기화 (클라이언트가 알아서 하거나 서버가 강제)
         // 여기서는 HP만 채워주고 클라이언트에게 라운드 시작 알림

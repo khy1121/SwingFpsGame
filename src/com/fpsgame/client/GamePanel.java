@@ -345,6 +345,13 @@ public class GamePanel extends JFrame implements KeyListener {
             super.paintComponent(g);
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            // 디버그: 주요 UI/데이터 상태 출력
+            System.out.println("[DEBUG] paintComponent called");
+            System.out.println("[DEBUG] abilities=" + (abilities == null ? "null" : Arrays.toString(abilities)));
+            System.out.println("[DEBUG] players.size=" + (players == null ? "null" : players.size()));
+            System.out.println("[DEBUG] showMinimap=" + showMinimap);
+            System.out.println("[DEBUG] chatArea=" + (chatArea == null ? "null" : "ok"));
+            System.out.println("[DEBUG] canvas size=" + getWidth() + "," + getHeight());
 
             // 1. 맵 배경 그리기 (카메라 오프셋 적용)
             if (mapImage != null) {
@@ -360,10 +367,14 @@ public class GamePanel extends JFrame implements KeyListener {
             // 2.1 에어스트라이크 마커 (바닥 표시)
             drawStrikeMarkersMain(g2d);
 
-            // 2.5. 편집 모드 타일 오버레이
+            // 2.5. 편집 모드 타일 오버레이 (UI 렌더링 이전에 호출)
             if (editMode) {
                 drawEditorOverlay(g2d);
             }
+
+            // ...existing code...
+
+            // ...existing code...
 
             // 3. 다른 플레이어들 그리기 (화면 좌표로 변환)
             for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
@@ -510,6 +521,9 @@ public class GamePanel extends JFrame implements KeyListener {
                 }
             }
 
+            // ...existing code...
+
+            // === UI 요소는 항상 맨 마지막에 그리기 ===
             // 미니맵 그리기 (우측 상단)
             if (showMinimap) {
                 drawMinimap(g2d);
@@ -774,7 +788,8 @@ public class GamePanel extends JFrame implements KeyListener {
         // 미니맵 크기 및 위치 설정
         int minimapWidth = 200;
         int minimapHeight = 150;
-        int minimapX = getWidth() - minimapWidth - 20; // 우측 상단 20px 여백
+        // 캔버스 너비 기준으로 배치 (채팅 패널은 캔버스 밖에 있음)
+        int minimapX = canvas.getWidth() - minimapWidth - 20;
         int minimapY = 20;
 
         // 실제 맵 크기 사용
@@ -841,8 +856,25 @@ public class GamePanel extends JFrame implements KeyListener {
                 int dx = pd.x - playerX;
                 int dy = pd.y - playerY;
                 double distance = Math.sqrt(dx * dx + dy * dy);
-                if ((thermalActive) || (markActive && distance <= extendedRadius)
-                        || (!markActive && !thermalActive && distance <= VISION_RANGE)) {
+
+                // 뷰포트 체크: 적이 현재 화면에 보이는지 확인
+                boolean inViewport = (pd.x >= cameraX && pd.x <= cameraX + canvas.getWidth() &&
+                        pd.y >= cameraY && pd.y <= cameraY + canvas.getHeight());
+
+                // Piper 스킬(열감지/마크)은 뷰포트 무시, 일반 시야만 뷰포트 체크
+                boolean shouldShow = false;
+                if (thermalActive) {
+                    // 열감지: 전체 맵에서 모든 적 표시 (뷰포트 무시)
+                    shouldShow = true;
+                } else if (markActive && distance <= extendedRadius) {
+                    // 마크: 확장된 범위 내 적 표시 (뷰포트 무시)
+                    shouldShow = true;
+                } else if (!markActive && !thermalActive && distance <= VISION_RANGE && inViewport) {
+                    // 일반 시야: 범위 내 + 화면에 보이는 적만
+                    shouldShow = true;
+                }
+
+                if (shouldShow) {
                     int otherX = minimapX + (int) (pd.x * scaleX);
                     int otherY = minimapY + (int) (pd.y * scaleY);
                     if (thermalActive) {
@@ -950,7 +982,7 @@ public class GamePanel extends JFrame implements KeyListener {
         int hudWidth = 400;
         int hudHeight = 80;
         int hudX = (getWidth() - hudWidth) / 2;
-        int hudY = getHeight() - hudHeight - 10;
+        int hudY = getHeight() - hudHeight - 70;
 
         // 배경
         g.setColor(new Color(0, 0, 0, 180));
@@ -1059,11 +1091,32 @@ public class GamePanel extends JFrame implements KeyListener {
         int startRow = cameraY / TILE_SIZE;
         int endCol = Math.min(gridCols - 1, (cameraX + GameConstants.GAME_WIDTH) / TILE_SIZE + 1);
         int endRow = Math.min(gridRows - 1, (cameraY + GameConstants.GAME_HEIGHT) / TILE_SIZE + 1);
+
+        // 미니맵 영역 계산 (showMinimap이 true일 때만 제외)
+        Rectangle minimapRect = null;
+        if (showMinimap) {
+            int minimapWidth = 200;
+            int minimapHeight = 150;
+            // 캔버스 기준 좌표 사용
+            int minimapX = canvas.getWidth() - minimapWidth - 20;
+            int minimapY = 20;
+            minimapRect = new Rectangle(minimapX, minimapY, minimapWidth, minimapHeight);
+        }
+
         for (int r = startRow; r <= endRow; r++) {
             for (int c = startCol; c <= endCol; c++) {
                 boolean walkable = walkableGrid[r][c];
                 int px = c * TILE_SIZE - cameraX;
                 int py = r * TILE_SIZE - cameraY;
+
+                // 미니맵이 켜져있으면 미니맵 영역과 겹치는 타일 스킵
+                if (minimapRect != null) {
+                    Rectangle tileRect = new Rectangle(px, py, TILE_SIZE, TILE_SIZE);
+                    if (tileRect.intersects(minimapRect)) {
+                        continue;
+                    }
+                }
+
                 Color base = walkable ? new Color(0, 180, 0, 55) : new Color(180, 0, 0, 60);
                 if (isSpawnTile(redSpawnTiles, c, r)) {
                     base = new Color(255, 60, 60, 120);
@@ -2528,15 +2581,21 @@ public class GamePanel extends JFrame implements KeyListener {
                         int ty = Integer.parseInt(ts[2]);
                         String targetName = ts[3];
                         PlacedObjectClient turret = placedObjects.get(turretId);
-                        PlayerData target = players.get(targetName);
-                        if (turret != null && target != null) {
+                        // 타겟 플레이어 객체가 없어도(예: 나 자신, 혹은 시야 밖) 좌표 기반으로 발사
+                        if (turret != null) {
                             // Turret fires a missile toward target
                             int sx = turret.x;
                             int sy = turret.y;
-                            int dx = target.x - sx;
-                            int dy = target.y - sy;
-                            Missile m = new Missile(sx, sy, dx, dy, turret.team, "TURRET");
-                            missiles.add(m);
+                            int dx = tx - sx;
+                            int dy = ty - sy;
+                            double distance = Math.sqrt(dx * dx + dy * dy);
+                            if (distance > 0) {
+                                int speed = 8;
+                                int missileVx = (int) (dx / distance * speed);
+                                int missileVy = (int) (dy / distance * speed);
+                                Missile m = new Missile(sx, sy, missileVx, missileVy, turret.team, "TURRET");
+                                missiles.add(m);
+                            }
                             // Optional: turret muzzle flash effect
                             double ang = Math.atan2(dy, dx);
                             if (skillEffects != null)
@@ -2686,7 +2745,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
                     String winTeam = (winningTeam == GameConstants.TEAM_RED) ? "RED" : "BLUE";
                     centerMessage = winTeam + " 팀 승리!";
-                    centerMessageEndTime = System.currentTimeMillis() + 3000;
+                    centerMessageEndTime = System.currentTimeMillis() + 2000;
                     roundState = RoundState.ENDED;
 
                     appendChatMessage("[라운드] " + winTeam + " 팀 승리! (점수: " + redWins + " : " + blueWins + ")");
@@ -2701,6 +2760,14 @@ public class GamePanel extends JFrame implements KeyListener {
                 roundStartTime = System.currentTimeMillis();
                 centerMessage = "Round " + roundCount + " Ready";
                 centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+
+                // 라운드 시작 시 오브젝트 및 효과 초기화
+                placedObjects.clear();
+                strikeMarkers.clear();
+                if (effectsByPlayer != null) {
+                    effectsByPlayer.clear();
+                }
+                // skillEffects는 별도 초기화 필요 시 추가
 
                 // 리스폰
                 respawn();
@@ -2727,6 +2794,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 returnTimer.start();
                 break;
             }
+
         }
     }
 
