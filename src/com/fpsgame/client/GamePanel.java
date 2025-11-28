@@ -2851,6 +2851,9 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * 로비로 복귀
      */
+    /**
+     * 로비로 복귀
+     */
     private void returnToLobby() {
         // 게임 종료
         if (timer != null) {
@@ -2860,10 +2863,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 현재 창 닫기 및 로비 열기
         javax.swing.SwingUtilities.invokeLater(() -> {
-            java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(this);
-            if (window != null) {
-                window.dispose();
-            }
+            this.dispose(); // GamePanel이 JFrame이므로 직접 dispose
 
             // 로비 프레임 열기
             new LobbyFrame(playerName).setVisible(true);
