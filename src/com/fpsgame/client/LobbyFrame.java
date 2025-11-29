@@ -199,7 +199,7 @@ public class LobbyFrame extends JFrame {
 
         String[] maps = { "Map", "Map 2", "Map 3", "Village" };
         String[] mapIds = { "map", "map2", "map3", "village" };
-        String[] mapDescs = { "도로와 벽돌로 이루어진 맵입니다. 장거리 교전에 유의하세요. (기본 스타일). ", "통로가 많은 맵이니 뒤를 조심하세요",
+        String[] mapDescs = { "장거리, 근거리 교전이 섞인 복합 맵.", "통로가 많은 맵이니 뒤를 조심하세요",
                 "섬이 다양하고 길이 좁으니, 근접전이 많습니다.", "기본맵과 동일한 구조입니다. " };
 
         for (int i = 0; i < maps.length; i++) {

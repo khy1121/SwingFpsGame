@@ -147,6 +147,11 @@ public class GamePanel extends JFrame implements KeyListener {
     private int kills = 0;
     private int deaths = 0;
     private int myHP = GameConstants.MAX_HP;
+    private int myMaxHP = GameConstants.MAX_HP;
+    private int myDirection = 0; // 0:Down, 1:Up, 2:Left, 3:Right
+    private boolean isAttacking = false;
+    private long attackEndTime = 0;
+    private SpriteAnimation[] myAnimations;
 
     // 설치된 오브젝트 (지뢰, 터렛)
     private Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
@@ -218,8 +223,15 @@ public class GamePanel extends JFrame implements KeyListener {
         int targetX, targetY; // 보간을 위한 목표 위치
         int team;
         int hp;
+        int maxHp;
+        String characterId;
         int kills;
         int deaths;
+        int direction = 0; // 0:Down, 1:Up, 2:Left, 3:Right
+        boolean isAttacking = false;
+        long attackEndTime = 0;
+        SpriteAnimation[] animations; // [WalkDown, WalkUp, WalkLeft, WalkRight, AttackDown, AttackUp, AttackLeft,
+                                      // AttackRight]
 
         PlayerData(int x, int y, int team) {
             this.x = x;
@@ -228,6 +240,7 @@ public class GamePanel extends JFrame implements KeyListener {
             this.targetY = y;
             this.team = team;
             this.hp = GameConstants.MAX_HP;
+            this.maxHp = GameConstants.MAX_HP;
             this.kills = 0;
             this.deaths = 0;
         }
@@ -263,6 +276,9 @@ public class GamePanel extends JFrame implements KeyListener {
             setBackground(new Color(20, 25, 35));
             setFocusable(true);
             addKeyListener(GamePanel.this);
+
+            // 스프라이트 로드
+            GamePanel.this.loadSprites();
 
             // 마우스 클릭으로 기본 공격 (마우스 방향으로 발사)
             addMouseListener(new MouseAdapter() {
@@ -309,6 +325,9 @@ public class GamePanel extends JFrame implements KeyListener {
                         int targetMapX = e.getX() + cameraX;
                         int targetMapY = e.getY() + cameraY;
                         useBasicAttack(targetMapX, targetMapY);
+                        // 공격 애니메이션 트리거
+                        isAttacking = true;
+                        attackEndTime = System.currentTimeMillis() + 400; // 400ms 공격 애니메이션
                     }
                 }
 
@@ -393,24 +412,26 @@ public class GamePanel extends JFrame implements KeyListener {
                     Color playerColor = p.team == GameConstants.TEAM_RED ? new Color(244, 67, 54)
                             : new Color(33, 150, 243);
 
-                    g2d.setColor(playerColor);
-                    g2d.fillOval(screenX - 20, screenY - 20, 40, 40);
-
-                    // 해당 플레이어 주위 이펙트 (구버전)
-                    drawEffectsFor(g2d, entry.getKey(), screenX, screenY);
-                    // 구조화된 SkillEffect 렌더링 (원격 플레이어)
-                    skillEffects.drawForPlayer(entry.getKey(), g2d, screenX, screenY);
-
-                    // 이름 표시
-                    g2d.setColor(Color.WHITE);
-                    g2d.setFont(new Font("Arial", Font.BOLD, 12));
-                    FontMetrics fm = g2d.getFontMetrics();
-                    String name = entry.getKey();
-                    int nameWidth = fm.stringWidth(name);
-                    g2d.drawString(name, screenX - nameWidth / 2, screenY - 25);
+                    // 스프라이트 그리기 (원격 플레이어)
+                    if (p.animations != null) {
+                        int animIndex = p.direction;
+                        if (p.isAttacking)
+                            animIndex += 4;
+                        if (p.animations[animIndex] != null) {
+                            p.animations[animIndex].draw(g2d, screenX - 48, screenY - 64, 96, 128);
+                        } else {
+                            // Fallback
+                            g2d.setColor(playerColor);
+                            g2d.fillOval(screenX - 20, screenY - 20, 40, 40);
+                        }
+                    } else {
+                        // 기본 원 그리기
+                        g2d.setColor(playerColor);
+                        g2d.fillOval(screenX - 20, screenY - 20, 40, 40);
+                    }
 
                     // HP 바
-                    drawHealthBar(g2d, screenX, screenY + 25, p.hp);
+                    drawHealthBar(g2d, screenX, screenY + 25, p.hp, p.maxHp);
                 }
             }
 
@@ -419,8 +440,21 @@ public class GamePanel extends JFrame implements KeyListener {
             int myScreenY = playerY - cameraY;
 
             Color myColor = team == GameConstants.TEAM_RED ? new Color(255, 100, 100) : new Color(100, 150, 255);
-            g2d.setColor(myColor);
-            g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+            // 내 스프라이트 그리기
+            if (myAnimations != null) {
+                int animIndex = myDirection;
+                if (isAttacking)
+                    animIndex += 4;
+                if (myAnimations[animIndex] != null) {
+                    myAnimations[animIndex].draw(g2d, myScreenX - 48, myScreenY - 64, 96, 128);
+                } else {
+                    g2d.setColor(myColor);
+                    g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+                }
+            } else {
+                g2d.setColor(myColor);
+                g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+            }
 
             // 내 이펙트 (구버전)
             drawMyEffects(g2d);
@@ -435,7 +469,7 @@ public class GamePanel extends JFrame implements KeyListener {
             g2d.drawString(playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
 
             // 내 HP 바 (플레이어 아래)
-            drawHealthBar(g2d, myScreenX, myScreenY + 25, myHP);
+            drawHealthBar(g2d, myScreenX, myScreenY + 25, myHP, myMaxHP);
 
             // 조준선 그리기 (화면 좌표 기준)
             drawAimLine(g2d);
@@ -776,7 +810,7 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    private void drawHealthBar(Graphics2D g, int x, int y, int hp) {
+    private void drawHealthBar(Graphics2D g, int x, int y, int hp, int maxHp) {
         int barWidth = 40;
         int barHeight = 5;
 
@@ -784,7 +818,8 @@ public class GamePanel extends JFrame implements KeyListener {
         g.fillRect(x - barWidth / 2, y, barWidth, barHeight);
 
         g.setColor(Color.GREEN);
-        int currentWidth = (int) (barWidth * (hp / 100.0));
+        float ratio = (float) hp / Math.max(1, maxHp);
+        int currentWidth = (int) (barWidth * ratio);
         g.fillRect(x - barWidth / 2, y, currentWidth, barHeight);
     }
 
@@ -949,8 +984,8 @@ public class GamePanel extends JFrame implements KeyListener {
         yPos += 20;
 
         // HP 바
-        g.drawString("HP: " + myHP + "/" + GameConstants.MAX_HP, 20, yPos);
-        drawHealthBar(g, 130, yPos - 12, myHP);
+        g.drawString("HP: " + myHP + "/" + myMaxHP, 20, yPos);
+        drawHealthBar(g, 130, yPos - 12, myHP, myMaxHP);
         yPos += 20;
 
         // 킬/데스
@@ -1951,6 +1986,7 @@ public class GamePanel extends JFrame implements KeyListener {
         updateRavenRuntime(); // Raven 버프/대쉬 처리
         updatePiperRuntime(); // Piper 마킹/열감지 처리
         updateTeamPiperRuntime(); // 원격 Piper 팀 버프 처리
+        updateMyAnimation(); // 스프라이트 애니메이션 업데이트
 
         // 모든 다른 플레이어의 위치를 부드럽게 보간
         for (PlayerData pd : players.values()) {
@@ -2333,7 +2369,7 @@ public class GamePanel extends JFrame implements KeyListener {
             playerX = mapWidth / 2;
             playerY = mapHeight / 2;
         }
-        myHP = GameConstants.MAX_HP;
+        myHP = myMaxHP;
 
         appendChatMessage("[리스폰] 위치: (" + playerX + ", " + playerY + ")");
 
@@ -2415,6 +2451,29 @@ public class GamePanel extends JFrame implements KeyListener {
             case "CHAT":
                 // 채팅 메시지 표시 (서버에서 받은 모든 메시지 표시)
                 appendChatMessage(data);
+                break;
+
+            case "CHARACTER_SELECT":
+                // CHARACTER_SELECT:playerName,characterId
+                String[] cs = data.split(",");
+                if (cs.length >= 2) {
+                    String pName = cs[0];
+                    String charId = cs[1];
+                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(charId);
+                    int newMaxHp = (int) cd.health;
+
+                    if (pName.equals(playerName)) {
+                        selectedCharacter = charId;
+                        myMaxHP = newMaxHp;
+                        hasChangedCharacterInRound = true;
+                    } else {
+                        PlayerData pd = players.get(pName);
+                        if (pd != null) {
+                            pd.characterId = charId;
+                            pd.maxHp = newMaxHp;
+                        }
+                    }
+                }
                 break;
 
             case "PLAYER":
@@ -2795,24 +2854,6 @@ public class GamePanel extends JFrame implements KeyListener {
                 break;
             }
 
-            case "CHARACTER_SELECT": {
-                // CHARACTER_SELECT:playerName,characterId
-                String[] cs = data.split(",");
-                if (cs.length >= 2) {
-                    String pName = cs[0];
-                    String charId = cs[1];
-
-                    if (pName.equals(playerName)) {
-                        selectedCharacter = charId;
-                        hasChangedCharacterInRound = true; // 내 캐릭터 변경 기록
-                        appendChatMessage("[시스템] 캐릭터를 " + charId + "(으)로 변경했습니다.");
-                    } else {
-                        appendChatMessage("[시스템] " + pName + "님이 캐릭터를 변경했습니다.");
-                    }
-                }
-                break;
-            }
-
             case "GAME_OVER": {
                 // GAME_OVER:winningTeamName
                 centerMessage = data + " 팀 최종 승리!";
@@ -2848,9 +2889,6 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    /**
-     * 로비로 복귀
-     */
     /**
      * 로비로 복귀
      */
@@ -3427,5 +3465,134 @@ public class GamePanel extends JFrame implements KeyListener {
 
     @Override
     public void keyTyped(KeyEvent e) {
+    }
+
+    private void loadSprites() {
+        try {
+            ResourceManager rm = ResourceManager.getInstance();
+            myAnimations = new SpriteAnimation[8];
+
+            // Walk sprite sheet - 6행 구조:
+            // Row 0: DOWN, Row 1: LEFT_DOWN, Row 2: LEFT_UP, Row 3: UP, Row 4: RIGHT_UP,
+            // Row 5: RIGHT_DOWN
+            // 각 행은 왼쪽→오른쪽으로 애니메이션 프레임
+            java.awt.image.BufferedImage[] walkSheet = rm.getSpriteSheet("assets/characters/Raven_walk.png", 48, 64);
+
+            // Dash sprite sheet - 동일한 6행 구조
+            java.awt.image.BufferedImage[] dashSheet = rm.getSpriteSheet("assets/characters/Raven_Dash.png", 48, 64);
+
+            System.out.println("[SPRITE] Walk sheet: " + (walkSheet != null ? walkSheet.length + " frames" : "NULL"));
+            System.out.println("[SPRITE] Dash sheet: " + (dashSheet != null ? dashSheet.length + " frames" : "NULL"));
+
+            if (walkSheet != null && walkSheet.length > 0) {
+                // 프레임 수 계산 (전체 프레임 / 6행)
+                int framesPerRow = walkSheet.length / 6;
+                System.out.println("[SPRITE] Frames per row: " + framesPerRow);
+
+                // 각 방향의 프레임 추출
+                // 4방향 매핑: Down(row 0), Up(row 3), Left(row 1=LEFT_DOWN), Right(row
+                // 5=RIGHT_DOWN)
+                java.awt.image.BufferedImage[] downFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] upFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] leftFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] rightFrames = new java.awt.image.BufferedImage[framesPerRow];
+
+                for (int i = 0; i < framesPerRow; i++) {
+                    downFrames[i] = walkSheet[0 * framesPerRow + i]; // Row 0: DOWN
+                    upFrames[i] = walkSheet[3 * framesPerRow + i]; // Row 3: UP
+                    leftFrames[i] = walkSheet[1 * framesPerRow + i]; // Row 1: LEFT_DOWN
+                    rightFrames[i] = walkSheet[5 * framesPerRow + i]; // Row 5: RIGHT_DOWN
+                }
+
+                // Walk animations
+                myAnimations[0] = new SpriteAnimation(downFrames, 150, true); // Down
+                myAnimations[1] = new SpriteAnimation(upFrames, 150, true); // Up
+                myAnimations[2] = new SpriteAnimation(leftFrames, 150, true); // Left
+                myAnimations[3] = new SpriteAnimation(rightFrames, 150, true); // Right
+                System.out.println("[SPRITE] Walk animations created (6-row structure)");
+            } else {
+                System.out.println("[ERROR] Walk sheet invalid!");
+            }
+
+            if (dashSheet != null && dashSheet.length > 0) {
+                int framesPerRow = dashSheet.length / 6;
+
+                java.awt.image.BufferedImage[] downFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] upFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] leftFrames = new java.awt.image.BufferedImage[framesPerRow];
+                java.awt.image.BufferedImage[] rightFrames = new java.awt.image.BufferedImage[framesPerRow];
+
+                for (int i = 0; i < framesPerRow; i++) {
+                    downFrames[i] = dashSheet[0 * framesPerRow + i];
+                    upFrames[i] = dashSheet[3 * framesPerRow + i];
+                    leftFrames[i] = dashSheet[1 * framesPerRow + i];
+                    rightFrames[i] = dashSheet[5 * framesPerRow + i];
+                }
+
+                // Attack animations (Dash)
+                myAnimations[4] = new SpriteAnimation(downFrames, 100, false); // Down
+                myAnimations[5] = new SpriteAnimation(upFrames, 100, false); // Up
+                myAnimations[6] = new SpriteAnimation(leftFrames, 100, false); // Left
+                myAnimations[7] = new SpriteAnimation(rightFrames, 100, false); // Right
+                System.out.println("[SPRITE] Dash animations created (6-row structure)");
+            } else {
+                System.out.println("[ERROR] Dash sheet invalid!");
+            }
+
+            // 각 애니메이션 확인
+            for (int i = 0; i < 8; i++) {
+                System.out.println("[SPRITE] Animation[" + i + "]: " + (myAnimations[i] != null ? "OK" : "NULL"));
+            }
+        } catch (Exception e) {
+            System.out.println("[ERROR] loadSprites exception: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void updateMyAnimation() {
+        if (myAnimations == null)
+            return;
+
+        // 공격 상태 체크
+        if (isAttacking && System.currentTimeMillis() > attackEndTime) {
+            isAttacking = false;
+        }
+
+        // 이동 키 입력에 따른 방향 설정 (공격 중이 아닐 때만 방향 전환 허용)
+        if (!isAttacking) {
+            int oldDir = myDirection;
+            // 우선순위: 마지막으로 누른 키가 적용되도록 (S > W > A > D 순서로 체크)
+            if (keys[KeyEvent.VK_D]) {
+                myDirection = 3; // Right
+            }
+            if (keys[KeyEvent.VK_A]) {
+                myDirection = 2; // Left
+            }
+            if (keys[KeyEvent.VK_W]) {
+                myDirection = 1; // Up
+            }
+            if (keys[KeyEvent.VK_S]) {
+                myDirection = 0; // Down
+            }
+            if (oldDir != myDirection) {
+                System.out.println("[ANIM] Direction: " + oldDir + " -> " + myDirection);
+            }
+        }
+
+        int animIndex = myDirection;
+        if (isAttacking) {
+            animIndex += 4; // Attack animations are 4-7
+        }
+
+        // 현재 애니메이션 업데이트
+        if (myAnimations[animIndex] != null) {
+            // 이동 중이거나 공격 중일 때만 업데이트
+            boolean isMoving = keys[KeyEvent.VK_W] || keys[KeyEvent.VK_S] || keys[KeyEvent.VK_A] || keys[KeyEvent.VK_D];
+            if (isMoving || isAttacking) {
+                myAnimations[animIndex].update();
+            } else {
+                myAnimations[animIndex].reset(); // 멈추면 첫 프레임으로
+            }
+        }
     }
 }

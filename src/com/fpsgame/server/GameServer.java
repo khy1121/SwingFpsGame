@@ -258,6 +258,10 @@ public class GameServer {
                         if (ch != null && ch.playerInfo != null) {
                             sendMessage("STATS:" + ch.playerName + "," + ch.playerInfo.kills + ","
                                     + ch.playerInfo.deaths + "," + ch.playerInfo.hp);
+                            // 캐릭터 정보 전송 (있다면)
+                            if (ch.playerInfo.characterId != null) {
+                                sendMessage("CHARACTER_SELECT:" + ch.playerName + "," + ch.playerInfo.characterId);
+                            }
                         }
                     }
                     // 새 플레이어 스탯을 모두에게 전달
@@ -295,14 +299,21 @@ public class GameServer {
 
                     playerInfo.characterId = data;
 
+                    // 캐릭터별 HP 적용
+                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(data);
+                    playerInfo.hp = (int) cd.health;
+
                     // 변경 성공 알림 (본인 및 타인)
                     // CHARACTER_SELECT:playerName,characterId
                     String charSelectMsg = "CHARACTER_SELECT:" + playerName + "," + data;
                     broadcast(charSelectMsg, null);
 
-                    broadcast("CHAT:" + playerName + " 님이 " + com.fpsgame.common.CharacterData.getById(data).name
+                    broadcast("CHAT:" + playerName + " 님이 " + cd.name
                             + " 캐릭터를 선택했습니다!", null);
                     broadcastTeamRoster();
+
+                    // HP 변경 사항 브로드캐스트
+                    broadcastStats(playerName, playerInfo);
                     break;
 
                 case "READY":
@@ -484,7 +495,13 @@ public class GameServer {
                     if (resp.length >= 2) {
                         playerInfo.x = Float.parseFloat(resp[0]);
                         playerInfo.y = Float.parseFloat(resp[1]);
-                        playerInfo.hp = GameConstants.MAX_HP;
+                        // 캐릭터별 최대 HP로 부활
+                        if (playerInfo.characterId != null) {
+                            playerInfo.hp = (int) com.fpsgame.common.CharacterData
+                                    .getById(playerInfo.characterId).health;
+                        } else {
+                            playerInfo.hp = GameConstants.MAX_HP;
+                        }
                         // 3초 스폰 보호 시작
                         spawnProtectedUntil = System.currentTimeMillis() + 3000;
                         broadcastStats(playerName, playerInfo);
@@ -956,7 +973,12 @@ public class GameServer {
         // 여기서는 HP만 채워주고 클라이언트에게 라운드 시작 알림
         for (ClientHandler ch : clients.values()) {
             if (ch.playerInfo != null) {
-                ch.playerInfo.hp = GameConstants.MAX_HP;
+                // 캐릭터별 최대 HP로 회복
+                if (ch.playerInfo.characterId != null) {
+                    ch.playerInfo.hp = (int) com.fpsgame.common.CharacterData.getById(ch.playerInfo.characterId).health;
+                } else {
+                    ch.playerInfo.hp = GameConstants.MAX_HP;
+                }
                 // 위치는 클라이언트가 스폰 위치로 이동하도록 유도하거나 여기서 강제
             }
         }
