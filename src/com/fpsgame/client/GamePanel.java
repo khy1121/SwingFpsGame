@@ -360,13 +360,7 @@ public class GamePanel extends JFrame implements KeyListener {
             super.paintComponent(g);
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            // 디버그: 주요 UI/데이터 상태 출력
-            System.out.println("[DEBUG] paintComponent called");
-            System.out.println("[DEBUG] abilities=" + (abilities == null ? "null" : Arrays.toString(abilities)));
-            System.out.println("[DEBUG] players.size=" + (players == null ? "null" : players.size()));
-            System.out.println("[DEBUG] showMinimap=" + showMinimap);
-            System.out.println("[DEBUG] chatArea=" + (chatArea == null ? "null" : "ok"));
-            System.out.println("[DEBUG] canvas size=" + getWidth() + "," + getHeight());
+        
 
             // 1. 맵 배경 그리기 (카메라 오프셋 적용)
             if (mapImage != null) {
@@ -408,7 +402,7 @@ public class GamePanel extends JFrame implements KeyListener {
                     if (p.animations != null) {
                         int animIndex = p.direction;
                         if (animIndex < p.animations.length && p.animations[animIndex] != null) {
-                            // 애니메이션 그리는 코드 
+                            // 애니메이션 그리는 코드
                             p.animations[animIndex].draw(g2d, screenX - 20, screenY - 20, 40, 40);
                         } else {
                             // Fallback
@@ -435,7 +429,7 @@ public class GamePanel extends JFrame implements KeyListener {
             if (myAnimations != null) {
                 int animIndex = myDirection;
                 if (animIndex < myAnimations.length && myAnimations[animIndex] != null) {
-                   // 애니메이션 그리는 코드 
+                    // 애니메이션 그리는 코드
                     myAnimations[animIndex].draw(g2d, myScreenX - 20, myScreenY - 20, 40, 40);
                 } else {
                     g2d.setColor(myColor);
@@ -2364,7 +2358,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private void sendPosition() {
         if (out != null) {
             try {
-                out.writeUTF("POS:" + playerX + "," + playerY);
+                out.writeUTF("POS:" + playerX + "," + playerY + "," + myDirection);
                 out.flush();
             } catch (IOException ex) {
                 appendChatMessage("[에러] 위치 전송 실패: " + ex.getMessage());
@@ -2443,27 +2437,40 @@ public class GamePanel extends JFrame implements KeyListener {
                     if (pName.equals(playerName)) {
                         selectedCharacter = charId;
                         myMaxHP = newMaxHp;
+                        myHP = newMaxHp; // HP도 즉시 업데이트
                         currentCharacterData = cd;
                         abilities = CharacterData.createAbilities(selectedCharacter);
                         hasChangedCharacterInRound = true;
                         // 내 스프라이트 재로드
                         loadSprites();
+                        // 스프라이트가 제대로 로드되었는지 확인
+                        System.out.println("[DEBUG] 캐릭터 변경: " + charId + ", 스프라이트 로드: " + (myAnimations != null ? myAnimations.length : "null"));
+                        repaint();
                         appendChatMessage("[캐릭터] " + cd.name + "으로 변경되었습니다.");
                     } else {
                         PlayerData pd = players.get(pName);
-                        if (pd != null) {
+                        if (pd == null) {
+                            // 플레이어가 아직 없으면 생성 (위치는 나중에 PLAYER 메시지로 업데이트됨)
+                            pd = new PlayerData(0, 0, GameConstants.TEAM_RED); // 임시 위치
                             pd.characterId = charId;
                             pd.maxHp = newMaxHp;
-                            // 원격 플레이어 스프라이트 로드
-                            loadPlayerSprites(pd, charId);
-                            appendChatMessage("[캐릭터] " + pName + " -> " + cd.name);
+                            pd.hp = newMaxHp;
+                            players.put(pName, pd);
+                        } else {
+                            pd.characterId = charId;
+                            pd.maxHp = newMaxHp;
+                            pd.hp = newMaxHp; // HP도 즉시 업데이트
                         }
+                        // 원격 플레이어 스프라이트 로드
+                        loadPlayerSprites(pd, charId);
+                        System.out.println("[CHARACTER_SELECT] 원격 플레이어: " + pName + " -> " + charId + ", HP: " + newMaxHp);
+                        appendChatMessage("[캐릭터] " + pName + " -> " + cd.name);
                     }
                 }
                 break;
 
             case "PLAYER":
-                // PLAYER:name,x,y,team,hp
+                // PLAYER:name,x,y,team,hp,characterId,direction
                 String[] playerData = data.split(",");
                 if (playerData.length >= 5) {
                     String name = playerData[0];
@@ -2472,20 +2479,37 @@ public class GamePanel extends JFrame implements KeyListener {
                         int y = (int) Float.parseFloat(playerData[2]);
                         int t = Integer.parseInt(playerData[3]);
                         int hp = Integer.parseInt(playerData[4]);
+                        String charId = (playerData.length >= 6) ? playerData[5] : "raven";
+                        int direction = (playerData.length >= 7) ? Integer.parseInt(playerData[6]) : 0;
 
                         PlayerData pd = players.get(name);
                         if (pd == null) {
                             pd = new PlayerData(x, y, t);
                             pd.hp = hp;
+                            pd.characterId = charId;
+                            pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
+                            pd.direction = direction; // 방향 설정
                             players.put(name, pd);
-                            // characterId가 설정되어 있으면 해당 캐릭터로, 아니면 기본 raven으로 로드
-                            String charToLoad = (pd.characterId != null && !pd.characterId.isEmpty()) ? pd.characterId : "raven";
-                            loadPlayerSprites(pd, charToLoad);
+                            // 스프라이트 로드
+                            loadPlayerSprites(pd, charId);
+                            System.out.println("[PLAYER] 새 플레이어 생성: " + name + ", 캐릭터: " + charId + ", 방향: " + direction);
                         } else {
                             // 보간을 위해 목표 위치 설정 (즉시 이동하지 않음)
                             pd.targetX = x;
                             pd.targetY = y;
                             pd.hp = hp;
+                            pd.direction = direction; // 방향 업데이트
+
+                            // 캐릭터 ID가 변경되었거나 스프라이트가 로드되지 않았으면 로드
+                            if (charId != null && (!charId.equalsIgnoreCase(pd.characterId) || pd.animations == null)) {
+                                pd.characterId = charId;
+                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
+                                loadPlayerSprites(pd, charId);
+                                System.out.println("[PLAYER] 캐릭터 변경: " + name + " -> " + charId + ", maxHP: " + pd.maxHp);
+                            } else if (charId != null) {
+                                // 캐릭터 변경이 없어도 maxHp 업데이트 (동기화 보장)
+                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
+                            }
                         }
                     }
                 }
@@ -2502,17 +2526,38 @@ public class GamePanel extends JFrame implements KeyListener {
                 break;
 
             case "STATS":
-                // STATS:name,kills,deaths,hp
+                // STATS:name,kills,deaths,hp,characterId
                 String[] s = data.split(",");
                 if (s.length >= 4) {
                     String name = s[0];
                     int k = Integer.parseInt(s[1]);
                     int d = Integer.parseInt(s[2]);
                     int hp = Integer.parseInt(s[3]);
+                    String charId = s.length >= 5 ? s[4] : null;
+                    
                     if (name.equals(playerName)) {
                         kills = k;
                         deaths = d;
+                        
+                        // 캐릭터 ID가 전달된 경우 동기화 (HP 업데이트 전에 먼저 처리)
+                        if (charId != null && !charId.equalsIgnoreCase(selectedCharacter)) {
+                            System.out.println("[STATS 동기화] 캐릭터 변경 감지: " + selectedCharacter + " -> " + charId);
+                            selectedCharacter = charId;
+                            currentCharacterData = com.fpsgame.common.CharacterData.getById(charId);
+                            myMaxHP = (int) currentCharacterData.health;
+                            abilities = CharacterData.createAbilities(selectedCharacter);
+                            loadSprites();
+                            System.out.println("[STATS 동기화] 완료 - 캐릭터: " + charId + ", maxHP: " + myMaxHP);
+                            repaint();
+                        } else if (currentCharacterData != null) {
+                            // 캐릭터 변경이 없어도 maxHP 업데이트
+                            myMaxHP = (int) currentCharacterData.health;
+                        }
+                        
+                        // HP 업데이트 (캐릭터 동기화 후)
                         myHP = hp;
+                        System.out.println("[STATS] 최종 HP: " + myHP + "/" + myMaxHP);
+                        
                         if (myHP <= 0) {
                             // 서버 기준으로 사망 상태면 즉시 리스폰
                             respawn();
@@ -2523,6 +2568,15 @@ public class GamePanel extends JFrame implements KeyListener {
                             pd.kills = k;
                             pd.deaths = d;
                             pd.hp = hp;
+                            
+                            // 원격 플레이어 캐릭터 동기화
+                            if (charId != null && !charId.equals(pd.characterId)) {
+                                pd.characterId = charId;
+                                com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(charId);
+                                pd.maxHp = (int) cd.health;
+                                loadPlayerSprites(pd, charId);
+                                System.out.println("[STATS 동기화] " + name + " -> " + charId);
+                            }
                         }
                     }
                 }
@@ -2700,7 +2754,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
             case "OBJ_DESTROY": {
                 // OBJ_DESTROY:objId
-                // 라운드 종료 시 오브젝트 일괄 제거 
+                // 라운드 종료 시 오브젝트 일괄 제거
                 try {
                     int id = Integer.parseInt(data);
                     PlacedObjectClient obj = placedObjects.remove(id);
@@ -2811,13 +2865,26 @@ public class GamePanel extends JFrame implements KeyListener {
                 if (roundParts.length > 0) {
                     roundCount = Integer.parseInt(roundParts[0]);
 
-                    // 맵 ID가 포함되어 있으면 새 맵 로드
+                    // 맵 ID가 포함되어 있으면 새 맵 로드 (별도 스레드에서 처리)
                     if (roundParts.length > 1) {
                         String newMapId = roundParts[1];
                         if (!newMapId.equals(currentMapName)) {
-                            currentMapName = newMapId;
-                            loadMap(newMapId);
-                            appendChatMessage("[맵] " + newMapId + " 맵으로 변경되었습니다!");
+                            final String mapToLoad = newMapId;
+                            // 맵 로딩을 별도 스레드에서 처리하여 메인 스레드 블록 방지
+                            new Thread(() -> {
+                                try {
+                                    System.out.println("[맵] 로딩 시작: " + mapToLoad);
+                                    currentMapName = mapToLoad;
+                                    loadMap(mapToLoad);
+                                    SwingUtilities.invokeLater(() -> {
+                                        appendChatMessage("[맵] " + mapToLoad + " 맵으로 변경되었습니다!");
+                                    });
+                                    System.out.println("[맵] 로딩 완료: " + mapToLoad);
+                                } catch (Exception e) {
+                                    System.err.println("[맵] 로딩 실패: " + e.getMessage());
+                                    e.printStackTrace();
+                                }
+                            }, "MapLoader-Thread").start();
                         }
                     }
                     roundState = RoundState.WAITING;
@@ -2889,12 +2956,16 @@ public class GamePanel extends JFrame implements KeyListener {
         }
         disconnect();
 
-        // 현재 창 닫기 및 로비 열기
+        // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
+        final String currentChar = selectedCharacter; // 현재 캐릭터 저장
         javax.swing.SwingUtilities.invokeLater(() -> {
             this.dispose(); // GamePanel이 JFrame이므로 직접 dispose
 
-            // 로비 프레임 열기
-            new LobbyFrame(playerName).setVisible(true);
+            // 로비 프레임 열기 (선택된 캐릭터 유지)
+            System.out.println("[로비] 백 전환 - 캐릭터 유지: " + currentChar);
+            LobbyFrame lobby = new LobbyFrame(playerName);
+            // LobbyFrame에 선택된 캐릭터 정보 전달 (가능하면)
+            lobby.setVisible(true);
         });
     }
 
@@ -3475,11 +3546,13 @@ public class GamePanel extends JFrame implements KeyListener {
                     case "piper":
                         spritePath += "Piper_48_64.png";
                         break;
+                    case "technician":
                     case "tech":
                         spritePath += "Technician_48_64.png";
                         break;
+                    case "general":
                     case "gen":
-                        spritePath += "General_48_64.png";
+                        spritePath += "General_48_64.png"; 
                         break;
                     default:
                         spritePath += "Raven_48_64.png";
@@ -3510,14 +3583,14 @@ public class GamePanel extends JFrame implements KeyListener {
                 for (int i = 0; i < framesPerRow; i++) {
                     downFrames[i] = walkSheet[0 * framesPerRow + i]; // Row 0: DOWN
                     rightFrames[i] = walkSheet[1 * framesPerRow + i]; // Row 1: right
-                    upFrames[i] = walkSheet[2 * framesPerRow + i];   // Row 2: UP
+                    upFrames[i] = walkSheet[2 * framesPerRow + i]; // Row 2: UP
                     leftFrames[i] = walkSheet[3 * framesPerRow + i]; // Row 3: left
                 }
 
                 // Walk animations (4방향만)
-                myAnimations[0] = new SpriteAnimation(downFrames, 150, true);  // Down
-                myAnimations[1] = new SpriteAnimation(upFrames, 150, true);    // Up
-                myAnimations[2] = new SpriteAnimation(leftFrames, 150, true);  // Left
+                myAnimations[0] = new SpriteAnimation(downFrames, 150, true); // Down
+                myAnimations[1] = new SpriteAnimation(upFrames, 150, true); // Up
+                myAnimations[2] = new SpriteAnimation(leftFrames, 150, true); // Left
                 myAnimations[3] = new SpriteAnimation(rightFrames, 150, true); // Right
 
                 System.out.println("[SPRITE] Walk animations created for " + selectedCharacter);
@@ -3553,11 +3626,13 @@ public class GamePanel extends JFrame implements KeyListener {
                     case "piper":
                         spritePath += "Piper_48_64.png";
                         break;
+                    case "technician":
                     case "tech":
                         spritePath += "Technician_48_64.png";
                         break;
+                    case "general":
                     case "gen":
-                        spritePath += "General_48_64.png";
+                        spritePath += "Genenal_48_64.png"; // 실제 파일명 (철자 오류)
                         break;
                     default:
                         spritePath += "Raven_48_64.png";
@@ -3634,4 +3709,42 @@ public class GamePanel extends JFrame implements KeyListener {
             }
         }
     }
+
+    private void updatePlayerAnimation(PlayerData player) {
+        if (player.animations == null)
+            return;
+
+        // 이동 키 입력에 따른 방향 설정
+        int oldDir = player.direction;
+        // 우선순위: 마지막으로 누른 키가 적용되도록 (S > W > A > D 순서로 체크)
+        if (keys[KeyEvent.VK_D]) {
+            player.direction = 3; // Right
+        }
+        if (keys[KeyEvent.VK_A]) {
+            player.direction = 2; // Left
+        }
+        if (keys[KeyEvent.VK_W]) {
+            player.direction = 1; // Up
+        }
+        if (keys[KeyEvent.VK_S]) {
+            player.direction = 0; // Down
+        }
+        if (oldDir != player.direction) {
+            System.out.println("[ANIM] Direction: " + oldDir + " -> " + player.direction);
+        }
+
+        // 현재 애니메이션 업데이트
+        if (player.direction < player.animations.length && player.animations[player.direction] != null) {
+            // 이동 중일 때만 업데이트
+            boolean isMoving = keys[KeyEvent.VK_W] || keys[KeyEvent.VK_S] || keys[KeyEvent.VK_A] || keys[KeyEvent.VK_D];
+            if (isMoving) {
+                player.animations[player.direction].update();
+            } else {
+                player.animations[player.direction].reset(); // 멈추면 첫 프레임으로
+            }
+        }
+    }
+
 }
+
+    
