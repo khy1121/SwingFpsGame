@@ -36,7 +36,7 @@ public class GameServer {
     private AtomicInteger nextStrikeId = new AtomicInteger(1);
 
     // 라운드 시스템
-    private int roundCount = 1;
+    private int roundCount = 0;
     private int redWins = 0;
     private int blueWins = 0;
     private boolean roundEnded = false;
@@ -192,7 +192,8 @@ public class GameServer {
     private void broadcastStats(String name, Protocol.PlayerInfo info) {
         if (info == null)
             return;
-        String stats = "STATS:" + name + "," + info.kills + "," + info.deaths + "," + info.hp;
+        String charId = (info.characterId != null) ? info.characterId : "raven";
+        String stats = "STATS:" + name + "," + info.kills + "," + info.deaths + "," + info.hp + "," + charId;
         for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
             entry.getValue().sendMessage(stats);
         }
@@ -310,10 +311,10 @@ public class GameServer {
 
                     broadcast("CHAT:" + playerName + " 님이 " + cd.name
                             + " 캐릭터를 선택했습니다!", null);
-                    broadcastTeamRoster();
-
-                    // HP 변경 사항 브로드캐스트
+                    
+                    // HP 변경 사항 즉시 브로드캐스트 (broadcastTeamRoster 전에)
                     broadcastStats(playerName, playerInfo);
+                    broadcastTeamRoster();
                     break;
 
                 case "READY":
@@ -360,6 +361,8 @@ public class GameServer {
                     for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
                         e.getValue().sendMessage("GAME_START");
                     }
+                    // 첫 라운드 시작
+                    startNextRound();
                     break;
 
                 case "POS":
@@ -367,8 +370,12 @@ public class GameServer {
                     if (coords.length >= 2) {
                         playerInfo.x = Float.parseFloat(coords[0]);
                         playerInfo.y = Float.parseFloat(coords[1]);
+                        // 방향 정보 파싱 (0:Down, 1:Up, 2:Left, 3:Right)
+                        int direction = (coords.length >= 3) ? Integer.parseInt(coords[2]) : 0;
+                        String charId = (playerInfo.characterId != null) ? playerInfo.characterId : "raven";
+                        // PLAYER:이름,x,y,팀,hp,캐릭터ID,방향
                         String posUpdate = "PLAYER:" + playerName + "," + playerInfo.x + "," + playerInfo.y + ","
-                                + playerInfo.team + "," + playerInfo.hp;
+                                + playerInfo.team + "," + playerInfo.hp + "," + charId + "," + direction;
                         broadcast(posUpdate, playerName);
 
                         // 오라 범위 체크 및 버프 적용/제거
@@ -390,14 +397,22 @@ public class GameServer {
                                 playerInfo.hp -= mineDamage;
                                 if (playerInfo.hp < 0)
                                     playerInfo.hp = 0;
+                                
+                                // 지뢰로 사망한 경우 사망 처리
+                                if (playerInfo.hp <= 0) {
+                                    playerInfo.deaths++;
+                                    broadcast("CHAT:" + playerName + " 님이 지뢰를 밟아 사망했습니다!", null);
+                                    checkRoundEnd();
+                                } else {
+                                    broadcast("CHAT:" + playerName + " 님이 지뢰를 밟아 폭발! (데미지 " + mineDamage + ")", null);
+                                }
+                                
                                 broadcastStats(playerName, playerInfo);
                                 // 지뢰 파괴 메시지
                                 String destroyMsg = "OBJ_DESTROY:" + mineId;
                                 for (ClientHandler ch : clients.values()) {
                                     ch.sendMessage(destroyMsg);
                                 }
-                                // 채팅 알림
-                                broadcast("CHAT:" + playerName + " 님이 지뢰를 밟아 폭발! (데미지 " + mineDamage + ")", null);
                             }
                         }
                     }
@@ -505,8 +520,9 @@ public class GameServer {
                         // 3초 스폰 보호 시작
                         spawnProtectedUntil = System.currentTimeMillis() + 3000;
                         broadcastStats(playerName, playerInfo);
+                        String charId = (playerInfo.characterId != null) ? playerInfo.characterId : "raven";
                         String posUpdate = "PLAYER:" + playerName + "," + playerInfo.x + "," + playerInfo.y + ","
-                                + playerInfo.team + "," + playerInfo.hp;
+                                + playerInfo.team + "," + playerInfo.hp + "," + charId;
                         broadcast(posUpdate, playerName);
                         broadcast("CHAT:" + playerName + " 님이 리스폰했습니다!", null);
                     }
@@ -953,7 +969,13 @@ public class GameServer {
     }
 
     private void startNextRound() {
-        roundCount++;
+        // 라운드가 끝난 후 호출되므로 카운트 증가
+        // 단, 첫 게임 시작(roundCount==0)일 때는 1로 시작
+        if (roundCount == 0) {
+            roundCount = 1;
+        } else if (roundEnded) {
+            roundCount++;
+        }
         roundEnded = false;
 
         // 랜덤 맵 선택
