@@ -18,17 +18,17 @@ import javax.swing.*;
  */
 public class GamePanel extends JFrame implements KeyListener {
 
-    private String playerName;
-    private int team;
-    private Socket socket;
-    private DataOutputStream out;
-    private DataInputStream in;
+    private final String playerName;
+    private final int team;
+    private final Socket socket;
+    private final DataOutputStream out;
+    private final DataInputStream in;
 
     private javax.swing.Timer timer;
     private int playerX = 400;
     private int playerY = 300;
     private final int SPEED = 5;
-    private boolean[] keys = new boolean[256];
+    private final boolean[] keys = new boolean[256];
 
     // 선택된 캐릭터
     private String selectedCharacter = "raven"; // 기본값
@@ -36,7 +36,6 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 스킬 시스템
     private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
-    private long lastBasicAttackTime = 0;
 
     // 스킬 이펙트 (네트워크 포함)
     private static class ActiveEffect {
@@ -84,7 +83,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private Map<String, PlayerData> players = new HashMap<>();
 
     // 미사일 리스트
-    private List<Missile> missiles = new ArrayList<>();
+    private final List<Missile> missiles = new ArrayList<>();
 
     // 게임 패널
     private GameCanvas canvas;
@@ -119,11 +118,11 @@ public class GamePanel extends JFrame implements KeyListener {
     private int gridCols, gridRows;
     private Rectangle redSpawnZone, blueSpawnZone; // 팀 스폰 구역
     // 스폰 타일 원본 목록 (랜덤 스폰을 타일 단위로 정확히 하도록 유지)
-    private java.util.List<int[]> redSpawnTiles = new ArrayList<>();
-    private java.util.List<int[]> blueSpawnTiles = new ArrayList<>();
+    private final java.util.List<int[]> redSpawnTiles = new ArrayList<>();
+    private final java.util.List<int[]> blueSpawnTiles = new ArrayList<>();
 
     // 장애물 시스템
-    private java.util.List<Rectangle> obstacles = new ArrayList<>();
+    private final java.util.List<Rectangle> obstacles = new ArrayList<>();
     // 디버그 토글
     private boolean debugObstacles = false; // F3로 토글
 
@@ -152,10 +151,10 @@ public class GamePanel extends JFrame implements KeyListener {
     private SpriteAnimation[] myAnimations;
 
     // 설치된 오브젝트 (지뢰, 터렛)
-    private Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
+    private final Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
 
     // 에어스트라이크 마커
-    private Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
+    private final Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
 
     // General 궁극기: 미니맵 타겟팅 대기 상태
     private boolean awaitingMinimapTarget = false;
@@ -690,34 +689,6 @@ public class GamePanel extends JFrame implements KeyListener {
                 int arcStart = (int) ((t * 180) % 360);
                 ((Graphics2D) g2d).setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 g2d.drawArc(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2, arcStart, 60);
-            }
-        }
-    }
-
-    private void drawEffectsFor(Graphics2D g2d, String player, int x, int y) {
-        java.util.List<ActiveEffect> list = effectsByPlayer.get(player);
-        if (list == null || list.isEmpty())
-            return;
-        for (ActiveEffect ef : list) {
-            float progress = 1f - (ef.remaining / ef.duration);
-            int radius = 28 + (int) (Math.sin(progress * 6.28318) * 4);
-            int alpha = (int) (160 * (ef.remaining / ef.duration));
-            alpha = Math.max(40, Math.min(200, alpha));
-            g2d.setColor(new Color(ef.color.getRed(), ef.color.getGreen(), ef.color.getBlue(), alpha));
-            Stroke old = g2d.getStroke();
-            g2d.setStroke(new BasicStroke(3f));
-            g2d.drawOval(x - radius, y - radius, radius * 2, radius * 2);
-            g2d.setStroke(old);
-
-            // 원격 Piper 특수 이펙트
-            if ("piper_mark".equalsIgnoreCase(ef.abilityId)) {
-                g2d.setColor(new Color(100, 220, 255, 80));
-                g2d.drawOval(x - radius - 6, y - radius - 6, (radius + 6) * 2, (radius + 6) * 2);
-            } else if ("piper_thermal".equalsIgnoreCase(ef.abilityId)) {
-                int glowR = radius + 8;
-                g2d.setColor(new Color(255, 160, 40, 110));
-                g2d.setStroke(new BasicStroke(4f));
-                g2d.drawOval(x - glowR, y - glowR, glowR * 2, glowR * 2);
             }
         }
     }
@@ -2330,7 +2301,8 @@ public class GamePanel extends JFrame implements KeyListener {
                         }
                         out.flush();
                     } catch (IOException ex) {
-                        ex.printStackTrace();
+                        System.err.println("[ERROR] Failed to send DEATH message");
+                        ex.printStackTrace(System.err);
                     }
                     break;
                 }
@@ -2893,7 +2865,7 @@ public class GamePanel extends JFrame implements KeyListener {
                                     System.out.println("[맵] 로딩 완료: " + mapToLoad);
                                 } catch (Exception e) {
                                     System.err.println("[맵] 로딩 실패: " + e.getMessage());
-                                    e.printStackTrace();
+                                    e.printStackTrace(System.err);
                                 }
                             }, "MapLoader-Thread").start();
                         }
@@ -3019,7 +2991,8 @@ public class GamePanel extends JFrame implements KeyListener {
             if (socket != null)
                 socket.close();
         } catch (IOException ex) {
-            ex.printStackTrace();
+            System.err.println("[ERROR] Failed to close network resources");
+            ex.printStackTrace(System.err);
         }
     }
 
@@ -3614,7 +3587,8 @@ public class GamePanel extends JFrame implements KeyListener {
                     out.flush();
                     System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
                 } catch (IOException ex) {
-                    ex.printStackTrace();
+                    System.err.println("[ERROR] Failed to send CHARACTER_SELECT message");
+                    ex.printStackTrace(System.err);
                     // 실패 시 플래그 되돌림
                     hasChangedCharacterInRound = false;
                 }
@@ -3716,8 +3690,8 @@ public class GamePanel extends JFrame implements KeyListener {
                 System.out.println("[SPRITE] Animation[" + i + "]: " + (myAnimations[i] != null ? "OK" : "NULL"));
             }
         } catch (Exception e) {
-            System.out.println("[ERROR] 스프라이트 로드 에러: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("[ERROR] 스프라이트 로드 에러: " + e.getMessage());
+            e.printStackTrace(System.err);
         }
     }
 
@@ -3789,7 +3763,7 @@ public class GamePanel extends JFrame implements KeyListener {
             }
         } catch (Exception e) {
             System.err.println("[SPRITE] ❌ 치명적 오류: " + characterId + " 로드 실패");
-            e.printStackTrace();
+            e.printStackTrace(System.err);
             
             // Fallback: 기본 애니메이션 설정 (null 방지)
             player.animations = null;
@@ -3827,41 +3801,6 @@ public class GamePanel extends JFrame implements KeyListener {
                 myAnimations[myDirection].update();
             } else {
                 myAnimations[myDirection].reset(); // 멈추면 첫 프레임으로
-            }
-        }
-    }
-
-    private void updatePlayerAnimation(PlayerData player) {
-        if (player.animations == null)
-            return;
-
-        // 이동 키 입력에 따른 방향 설정
-        int oldDir = player.direction;
-        // 우선순위: 마지막으로 누른 키가 적용되도록 (S > W > A > D 순서로 체크)
-        if (keys[KeyEvent.VK_D]) {
-            player.direction = 3; // Right
-        }
-        if (keys[KeyEvent.VK_A]) {
-            player.direction = 2; // Left
-        }
-        if (keys[KeyEvent.VK_W]) {
-            player.direction = 1; // Up
-        }
-        if (keys[KeyEvent.VK_S]) {
-            player.direction = 0; // Down
-        }
-        if (oldDir != player.direction) {
-            System.out.println("[ANIM] Direction: " + oldDir + " -> " + player.direction);
-        }
-
-        // 현재 애니메이션 업데이트
-        if (player.direction < player.animations.length && player.animations[player.direction] != null) {
-            // 이동 중일 때만 업데이트
-            boolean isMoving = keys[KeyEvent.VK_W] || keys[KeyEvent.VK_S] || keys[KeyEvent.VK_A] || keys[KeyEvent.VK_D];
-            if (isMoving) {
-                player.animations[player.direction].update();
-            } else {
-                player.animations[player.direction].reset(); // 멈추면 첫 프레임으로
             }
         }
     }

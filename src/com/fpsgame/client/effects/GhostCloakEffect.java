@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Ghost 전술 "투명화": 희미한 파랑/보라 반투명 외곽 */
+/**
+ * Ghost 전술 "투명화": 희미한 파랑/보라 반투명 외곽
+ * 현재 게임에서는 사용 불가.
+ */
 public class GhostCloakEffect extends SkillEffect {
     public GhostCloakEffect(float duration) { super("ghost_cloak", duration); }
 

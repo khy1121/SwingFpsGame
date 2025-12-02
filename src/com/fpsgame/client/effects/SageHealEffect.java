@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Sage 전술 "치료": 녹청색 힐 링 */
+/**
+ * Sage 전술 "치료": 녹청색 힐 링
+ * 현재 게임에서는 사용 불가.
+ */
 public class SageHealEffect extends SkillEffect {
     public SageHealEffect(float duration) { super("sage_heal", duration); }
 

@@ -44,7 +44,7 @@ public class GameServer {
 
     // 캐릭터 선택 제한 (라운드당 1회, 라운드 시작 10초 이내)
     private long currentRoundStartTime = 0;
-    private Map<String, Boolean> playerCharacterChanged = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> playerCharacterChanged = new ConcurrentHashMap<>();
 
     /**
      * 설치된 오브젝트 (지뢰, 터렛)

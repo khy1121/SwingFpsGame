@@ -2,6 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
+/**
+ * Bulldog 캐릭터 이펙트
+ * 현재 게임에서는 사용 불가.
+ */
 public class BulldogBarrageEffect extends SkillEffect {
 
     public BulldogBarrageEffect(float duration) {

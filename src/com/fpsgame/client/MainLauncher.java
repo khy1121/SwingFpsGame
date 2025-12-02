@@ -4,20 +4,35 @@ import java.awt.*;
 import javax.swing.*;
 
 /**
- * 메인 런처 - 기존 디자인 유지
- * 간단한 시작 화면
+ * 메인 런처 클래스
+ * 
+ * 게임의 진입점으로 플레이어 이름을 입력받고 로비로 진입합니다.
+ * 간단한 UI로 게임 시작 전 초기 화면을 제공합니다.
  */
 public class MainLauncher extends JFrame {
 
+    /** 플레이어 이름 입력 필드 */
     private JTextField nameField;
+    
+    /** 게임 시작 버튼 */
     private JButton startButton;
+    
+    /** 게임 종료 버튼 */
     private JButton exitButton;
 
+    /**
+     * 메인 런처 생성자
+     */
     public MainLauncher() {
         super("FPS Game Launcher");
         initUI();
     }
 
+    /**
+     * UI 초기화
+     * 
+     * 타이틀, 이름 입력 필드, 시작/종료 버튼을 배치합니다.
+     */
     private void initUI() {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(500, 350);
@@ -38,13 +53,13 @@ public class MainLauncher extends JFrame {
         titleLabel.setForeground(Color.WHITE);
         titlePanel.add(titleLabel);
 
-        // 중앙 패널
+        // 중앙 패널 - 이름 입력
         JPanel centerPanel = new JPanel(new GridBagLayout());
         centerPanel.setBackground(new Color(40, 50, 65));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(10, 10, 10, 10);
 
-        // 이름 입력
+        // 이름 라벨
         gbc.gridx = 0;
         gbc.gridy = 0;
         JLabel nameLabel = new JLabel("플레이어 이름:");
@@ -52,6 +67,7 @@ public class MainLauncher extends JFrame {
         nameLabel.setFont(koreanBold);
         centerPanel.add(nameLabel, gbc);
 
+        // 이름 입력 필드
         gbc.gridx = 1;
         nameField = new JTextField(15);
         nameField.setFont(koreanFont);
@@ -61,6 +77,7 @@ public class MainLauncher extends JFrame {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 20));
         buttonPanel.setBackground(new Color(40, 50, 65));
 
+        // 시작 버튼
         startButton = new JButton("게임 시작");
         startButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
         startButton.setPreferredSize(new Dimension(160, 45));
@@ -69,6 +86,7 @@ public class MainLauncher extends JFrame {
         startButton.setFocusPainted(false);
         startButton.addActionListener(e -> startGame());
 
+        // 종료 버튼
         exitButton = new JButton("종료");
         exitButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
         exitButton.setPreferredSize(new Dimension(160, 45));
@@ -86,8 +104,16 @@ public class MainLauncher extends JFrame {
         add(buttonPanel, BorderLayout.SOUTH);
     }
 
+    /**
+     * 게임 시작 처리
+     * 
+     * 플레이어 이름을 검증하고 로비 프레임을 엽니다.
+     * 이름이 비어있으면 오류 메시지를 표시합니다.
+     */
     private void startGame() {
         String playerName = nameField.getText().trim();
+        
+        // 이름 입력 검증
         if (playerName.isEmpty()) {
             JOptionPane.showMessageDialog(this,
                     "이름을 입력해주세요!",
@@ -100,17 +126,25 @@ public class MainLauncher extends JFrame {
         SwingUtilities.invokeLater(() -> {
             LobbyFrame lobby = new LobbyFrame(playerName);
             lobby.setVisible(true);
-            dispose();
+            dispose(); // 런처 창 닫기
         });
     }
 
+    /**
+     * 프로그램 진입점
+     * 
+     * @param args 커맨드 라인 인자 (사용하지 않음)
+     */
     public static void main(String[] args) {
+        // 시스템 Look and Feel 적용
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("[MainLauncher] Failed to set Look and Feel");
+            e.printStackTrace(System.err);
         }
 
+        // 런처 창 표시
         SwingUtilities.invokeLater(() -> {
             MainLauncher launcher = new MainLauncher();
             launcher.setVisible(true);

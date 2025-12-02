@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Ghost 궁극 "열감지 무효": 열 차단 상징 보라 링 + 회전 작은 아크 */
+/**
+ * Ghost 궁극 "열감지 무효": 열 차단 상징 보라 링 + 회전 작은 아크
+ * 현재 게임에서는 사용 불가.
+ */
 public class GhostNullifyEffect extends SkillEffect {
     public GhostNullifyEffect(float duration) { super("ghost_nullify", duration); }
 

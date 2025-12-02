@@ -12,24 +12,48 @@ import javax.swing.border.*;
 
 /**
  * 캐릭터 선택 다이얼로그
- * B키를 누르면 표시됨
+ * 
+ * 플레이어가 사용할 캐릭터를 선택하는 모달 창입니다.
+ * B키를 누르면 표시되며, 팀 선택 후에만 사용 가능합니다.
+ * 
+ * 사용 가능한 캐릭터: Raven, Piper, Technician, General
+ * 추후 업데이트 예정: Bulldog, Ghost, Sage, Skull, Steam, Wildcat
  */
 public class CharacterSelectDialog extends JDialog {
 
+    /** 선택된 캐릭터 ID */
     private String selectedCharacterId;
-    private boolean confirmed = false;
-    private java.util.Set<String> disabledCharacters; // 비활성화된 캐릭터 (같은 팀에서 이미 선택됨)
-    private java.util.Map<String, String> characterOwners; // 캐릭터ID -> 선택한 플레이어 이름
     
-    // 현재 사용 가능한 캐릭터 목록
+    /** 선택 확인 여부 */
+    private boolean confirmed = false;
+    
+    /** 비활성화된 캐릭터 목록 (같은 팀에서 이미 선택됨) */
+    private final java.util.Set<String> disabledCharacters;
+    
+    /** 캐릭터별 선택한 플레이어 이름 맵 */
+    private final java.util.Map<String, String> characterOwners;
+    
+    /** 현재 사용 가능한 캐릭터 목록 */
     private static final java.util.Set<String> AVAILABLE_CHARACTERS = new java.util.HashSet<>(java.util.Arrays.asList(
         "raven", "piper", "technician", "general"
     ));
 
+    /**
+     * 캐릭터 선택 다이얼로그 생성자 (기본)
+     * 
+     * @param parent 부모 프레임
+     */
     public CharacterSelectDialog(Frame parent) {
         this(parent, new java.util.HashSet<>(), new java.util.HashMap<>());
     }
 
+    /**
+     * 캐릭터 선택 다이얼로그 생성자 (전체)
+     * 
+     * @param parent 부모 프레임
+     * @param disabledCharacters 비활성화할 캐릭터 목록
+     * @param characterOwners 캐릭터별 선택한 플레이어
+     */
     public CharacterSelectDialog(Frame parent, java.util.Set<String> disabledCharacters,
             java.util.Map<String, String> characterOwners) {
         super(parent, "캐릭터 선택", true);
@@ -38,6 +62,11 @@ public class CharacterSelectDialog extends JDialog {
         initUI();
     }
 
+    /**
+     * UI 초기화
+     * 
+     * 캐릭터 그리드, 타이틀, 하단 버튼을 배치합니다.
+     */
     private void initUI() {
         setSize(1000, 700);
         setLocationRelativeTo(getParent());

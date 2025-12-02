@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Skull 전술 "아드레날린": 녹색 회복 링 */
+/**
+ * Skull 전술 "아드레날린": 녹색 회복 링
+ * 현재 게임에서는 사용 불가.
+ */
 public class SkullAdrenalineEffect extends SkillEffect {
     public SkullAdrenalineEffect(float duration) { super("skull_adrenaline", duration); }
 

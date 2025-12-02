@@ -1,18 +1,35 @@
 package com.fpsgame.client;
 
-import javax.swing.*;
-import javax.swing.border.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.HashMap;
 import java.util.Map;
+import javax.swing.*;
+import javax.swing.border.*;
 
+/**
+ * 옵션 설정 다이얼로그
+ * 
+ * 게임의 다양한 설정을 변경할 수 있는 창입니다.
+ * - 일반 설정: 사운드 볼륨, 마우스 감도
+ * - 키 설정: 이동, 스킬 등의 키 바인딩
+ */
 public class OptionDialog extends JDialog {
 
+    /** 사운드 볼륨 슬라이더 (0-100) */
     private JSlider soundSlider;
+    
+    /** 마우스 감도 슬라이더 (1-20) */
     private JSlider mouseSlider;
-    private Map<String, JButton> keyButtons = new HashMap<>();
+    
+    /** 키 바인딩 버튼 맵 (액션 이름 -> 버튼) */
+    private final Map<String, JButton> keyButtons = new HashMap<>();
 
+    /**
+     * 옵션 다이얼로그 생성자
+     * 
+     * @param owner 부모 프레임
+     */
     public OptionDialog(Frame owner) {
         super(owner, "게임 설정", true);
         setLayout(new BorderLayout());
@@ -22,6 +39,11 @@ public class OptionDialog extends JDialog {
         initUI();
     }
 
+    /**
+     * UI 초기화
+     * 
+     * 탭 패널을 생성하고 각 설정 탭을 추가합니다.
+     */
     private void initUI() {
         Color bgDark = new Color(32, 34, 37);
         Color panelBg = new Color(47, 49, 54);
@@ -41,7 +63,7 @@ public class OptionDialog extends JDialog {
         gbc.insets = new Insets(10, 10, 10, 10);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        // Sound Volume
+        // 소리 크기
         JLabel lblSound = new JLabel("사운드 볼륨:");
         lblSound.setForeground(Color.WHITE);
         lblSound.setFont(koreanFont);
@@ -62,7 +84,7 @@ public class OptionDialog extends JDialog {
         gbc.weightx = 0.7;
         generalPanel.add(soundSlider, gbc);
 
-        // Mouse Sensitivity
+        // 마우스 감도
         JLabel lblMouse = new JLabel("마우스 감도:");
         lblMouse.setForeground(Color.WHITE);
         lblMouse.setFont(koreanFont);
@@ -155,10 +177,11 @@ public class OptionDialog extends JDialog {
 
         add(tabbedPane, BorderLayout.CENTER);
 
-        // Buttons
+        // 버튼
         JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
         btnPanel.setBackground(bgDark);
 
+        // 저장
         JButton btnSave = new JButton("저장");
         btnSave.setFont(koreanBold);
         btnSave.setBackground(new Color(67, 181, 129));
@@ -170,6 +193,7 @@ public class OptionDialog extends JDialog {
             dispose();
         });
 
+        // 취소
         JButton btnCancel = new JButton("취소");
         btnCancel.setFont(koreanBold);
         btnCancel.setBackground(new Color(100, 100, 100));
@@ -184,10 +208,12 @@ public class OptionDialog extends JDialog {
         add(btnPanel, BorderLayout.SOUTH);
     }
 
+    // 키 입력 캡처
     private void captureKey(String actionName, JButton button) {
         button.setText("키를 누르세요...");
         button.setBackground(new Color(255, 152, 0));
 
+        // KeyListener 등록
         KeyListener keyListener = new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -205,6 +231,7 @@ public class OptionDialog extends JDialog {
         button.requestFocusInWindow();
     }
 
+    // 기본값 복원
     private void resetToDefaults() {
         KeyBindingConfig.resetToDefaults();
 
@@ -225,6 +252,7 @@ public class OptionDialog extends JDialog {
                 JOptionPane.INFORMATION_MESSAGE);
     }
 
+    // 설정 저장
     private void saveSettings() {
         // 키 바인딩 저장
         KeyBindingConfig.saveBindings();

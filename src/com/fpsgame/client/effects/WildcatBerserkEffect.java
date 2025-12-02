@@ -2,6 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
+/**
+ * Wildcat 캐릭터 이펙트
+ * 현재 게임에서는 사용 불가.
+ */
 public class WildcatBerserkEffect extends SkillEffect {
 
     public WildcatBerserkEffect(float duration) {

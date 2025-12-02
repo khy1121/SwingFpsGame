@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Sage 궁극 "부활": 밝은 청록/흰색 듀얼 링 */
+/**
+ * Sage 궁극 "부활": 밝은 청록/흰색 듀얼 링
+ * 현재 게임에서는 사용 불가.
+ */
 public class SageReviveEffect extends SkillEffect {
     public SageReviveEffect(float duration) { super("sage_revive", duration); }
 

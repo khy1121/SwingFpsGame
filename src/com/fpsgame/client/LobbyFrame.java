@@ -9,15 +9,36 @@ import javax.swing.*;
 import javax.swing.border.*;
 
 /**
- * 로비 프레임 - 개선된 UI
- * 맵 선택, 팀 선택, 채팅, 플레이어 목록
+ * 로비 프레임
+ * 
+ * 게임 시작 전 대기 공간입니다.
+ * 
+ * 주요 기능:
+ * - 서버 연결
+ * - 팀 선택 (RED/BLUE)
+ * - 캐릭터 선택
+ * - 플레이어 목록 확인
+ * - 채팅
+ * - 준비 및 게임 시작
  */
 public class LobbyFrame extends JFrame {
 
-    // 커스텀 버튼: 전체 배경을 solid color로 채움 (hover/pressed/disabled 포함)
+    /**
+     * 커스텀 버튼 클래스
+     * 
+     * 전체 배경을 solid color로 채우는 버튼입니다.
+     * hover, pressed, disabled 상태를 시각적으로 표현합니다.
+     */
     private static class FilledButton extends JButton {
+        /** 비활성화 시 배경색 */
         private Color disabledBg = new Color(100, 100, 100);
 
+        /**
+         * FilledButton 생성자
+         * 
+         * @param text 버튼 텍스트
+         * @param bg 배경색
+         */
         FilledButton(String text, Color bg) {
             super(text);
             setBackground(bg);
@@ -28,6 +49,11 @@ public class LobbyFrame extends JFrame {
             setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
         }
 
+        /**
+         * 비활성화 시 배경색 설정
+         * 
+         * @param c 배경색
+         */
         void setDisabledBackground(Color c) {
             this.disabledBg = c;
             repaint();
@@ -38,6 +64,7 @@ public class LobbyFrame extends JFrame {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
+            // 버튼 상태에 따른 색상 결정
             Color fill;
             if (!isEnabled()) {
                 fill = disabledBg;
@@ -49,6 +76,7 @@ public class LobbyFrame extends JFrame {
                 fill = getBackground();
             }
 
+            // 배경 그리기
             g2.setColor(fill);
             g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
 
@@ -60,10 +88,12 @@ public class LobbyFrame extends JFrame {
             }
 
             g2.dispose();
-
             super.paintComponent(g);
         }
 
+        /**
+         * 색상 밝게 만들기
+         */
         private static Color brighter(Color c, float factor) {
             int r = Math.min(255, (int) (c.getRed() + 255 * factor));
             int g = Math.min(255, (int) (c.getGreen() + 255 * factor));
@@ -71,6 +101,9 @@ public class LobbyFrame extends JFrame {
             return new Color(r, g, b, c.getAlpha());
         }
 
+        /**
+         * 색상 어둡게 만들기
+         */
         private static Color darker(Color c, float factor) {
             int r = Math.max(0, (int) (c.getRed() - 255 * factor));
             int g = Math.max(0, (int) (c.getGreen() - 255 * factor));
@@ -79,40 +112,99 @@ public class LobbyFrame extends JFrame {
         }
     }
 
-    private String playerName;
+    // ===== 필드 =====
+    
+    /** 플레이어 이름 */
+    private final String playerName;
+    
+    // UI 컴포넌트
+    /** 서버 주소 입력 필드 */
     private JTextField serverField;
+    
+    /** 포트 번호 입력 스피너 */
     private JSpinner portSpinner;
+    
+    /** 서버 연결 버튼 */
     private JButton connectButton;
+    
+    /** 준비 버튼 */
     private JButton readyButton;
+    
+    /** 게임 시작 버튼 */
     private JButton startButton;
+    
+    /** RED 팀 선택 버튼 */
     private JButton redTeamButton;
+    
+    /** BLUE 팀 선택 버튼 */
     private JButton blueTeamButton;
-    private JButton characterSelectButton; // 캐릭터 선택 버튼 추가
+    
+    /** 캐릭터 선택 버튼 */
+    private JButton characterSelectButton;
+    
+    /** 채팅 영역 */
     private JTextArea chatArea;
+    
+    /** 채팅 입력 필드 */
     private JTextField chatInput;
 
+    // 팀 목록 UI
+    /** RED 팀 목록 패널 */
     private JPanel redTeamList;
+    
+    /** BLUE 팀 목록 패널 */
     private JPanel blueTeamList;
-    private JLabel[] redSlots = new JLabel[5];
-    private JLabel[] blueSlots = new JLabel[5];
+    
+    /** RED 팀 슬롯 라벨 배열 (최대 5명) */
+    private final JLabel[] redSlots = new JLabel[5];
+    
+    /** BLUE 팀 슬롯 라벨 배열 (최대 5명) */
+    private final JLabel[] blueSlots = new JLabel[5];
 
+    // 게임 상태
+    /** 선택된 맵 이름 */
     private String selectedMap = "map";
+    
+    /** 선택된 캐릭터 ID */
     private String selectedCharacterId = "raven"; // 기본 캐릭터
 
+    // 네트워크
+    /** 서버 소켓 */
     private Socket socket;
+    
+    /** 출력 스트림 */
     private DataOutputStream out;
+    
+    /** 입력 스트림 */
     private DataInputStream in;
-    private int selectedTeam = -1; // -1=미선택, 0=RED, 1=BLUE
+    
+    /** 선택된 팀 (-1=미선택, 0=RED, 1=BLUE) */
+    private int selectedTeam = -1;
+    
+    /** 준비 상태 */
     private boolean isReady = false;
-    // 로비 수신 스레드 제어용
+    
+    /** 로비 수신 스레드 제어용 */
     private volatile boolean lobbyListening = false;
+    
+    /** 로비 수신 스레드 */
     private Thread lobbyThread;
 
     // 팀 로스터 (서버로부터 받아 업데이트)
-    private java.util.Map<String, Integer> playerTeams = new java.util.HashMap<>();
-    private java.util.Set<String> readyPlayers = new java.util.HashSet<>();
-    private java.util.Map<String, String> playerCharacters = new java.util.HashMap<>(); // 플레이어별 선택한 캐릭터
+    /** 플레이어별 팀 맵 (이름 -> 팀 번호) */
+    private final java.util.Map<String, Integer> playerTeams = new java.util.HashMap<>();
+    
+    /** 준비 완료한 플레이어 목록 */
+    private final java.util.Set<String> readyPlayers = new java.util.HashSet<>();
+    
+    /** 플레이어별 선택한 캐릭터 맵 (이름 -> 캐릭터 ID) */
+    private final java.util.Map<String, String> playerCharacters = new java.util.HashMap<>();
 
+    /**
+     * 로비 프레임 생성자
+     * 
+     * @param playerName 플레이어 이름
+     */
     public LobbyFrame(String playerName) {
         super("FPS 게임");
         this.playerName = playerName;
@@ -131,6 +223,11 @@ public class LobbyFrame extends JFrame {
         }
     }
 
+    /**
+     * UI 초기화
+     * 
+     * 로비의 모든 UI 컴포넌트를 생성하고 배치합니다.
+     */
     private void initUI() {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(1400, 800);

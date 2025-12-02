@@ -2,7 +2,10 @@ package com.fpsgame.client.effects;
 
 import java.awt.*;
 
-/** Skull 궁극 "탄약 보급": 황금 링 + 빠른 톱니형 회전(단순 호) */
+/**
+ * Skull 궁극 "탄약 보급": 황금 링 + 빠른 톱니형 회전(단순 호)
+ * 현재 게임에서는 사용 불가.
+ */
 public class SkullAmmoEffect extends SkillEffect {
     public SkullAmmoEffect(float duration) { super("skull_ammo", duration); }
 
