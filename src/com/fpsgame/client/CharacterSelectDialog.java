@@ -20,6 +20,11 @@ public class CharacterSelectDialog extends JDialog {
     private boolean confirmed = false;
     private java.util.Set<String> disabledCharacters; // 비활성화된 캐릭터 (같은 팀에서 이미 선택됨)
     private java.util.Map<String, String> characterOwners; // 캐릭터ID -> 선택한 플레이어 이름
+    
+    // 현재 사용 가능한 캐릭터 목록
+    private static final java.util.Set<String> AVAILABLE_CHARACTERS = new java.util.HashSet<>(java.util.Arrays.asList(
+        "raven", "piper", "technician", "general"
+    ));
 
     public CharacterSelectDialog(Frame parent) {
         this(parent, new java.util.HashSet<>(), new java.util.HashMap<>());
@@ -160,8 +165,9 @@ public class CharacterSelectDialog extends JDialog {
 
     private JPanel createCharacterCard(CharacterData data, Color cardBg, Color hoverBg, Font normalFont,
             Font boldFont) {
-        // 비활성화 여부 확인
-        boolean isDisabled = disabledCharacters.contains(data.id);
+        // 비활성화 여부 확인: 같은 팀에서 선택됨 OR 아직 구현되지 않은 캐릭터
+        boolean isDisabled = disabledCharacters.contains(data.id) || !AVAILABLE_CHARACTERS.contains(data.id);
+        boolean isComingSoon = !AVAILABLE_CHARACTERS.contains(data.id); // 추후 업데이트 예정
 
         JPanel card = new JPanel(new BorderLayout(8, 8));
 
@@ -295,13 +301,22 @@ public class CharacterSelectDialog extends JDialog {
 
             card.addMouseListener(mouseHandler);
         } else {
-            // 비활성화된 캐릭터에는 선택한 플레이어 이름 표시
-            String ownerName = characterOwners.get(data.id);
-            String labelText = ownerName != null ? ownerName + " 선택함" : "(선택됨)";
+            // 비활성화된 캐릭터에는 선택한 플레이어 이름 또는 "추후 업데이트 예정" 표시
+            String labelText;
+            Color labelColor;
+            
+            if (isComingSoon) {
+                labelText = "추후 업데이트 예정";
+                labelColor = new Color(200, 200, 100);
+            } else {
+                String ownerName = characterOwners.get(data.id);
+                labelText = ownerName != null ? ownerName + " 선택함" : "(선택됨)";
+                labelColor = new Color(255, 100, 100);
+            }
 
             JLabel disabledLabel = new JLabel(labelText);
             disabledLabel.setFont(new Font("맑은 고딕", Font.BOLD, 12));
-            disabledLabel.setForeground(new Color(255, 100, 100));
+            disabledLabel.setForeground(labelColor);
             disabledLabel.setHorizontalAlignment(SwingConstants.CENTER);
             card.add(disabledLabel, BorderLayout.NORTH);
         }
@@ -327,8 +342,30 @@ public class CharacterSelectDialog extends JDialog {
 
     public static String showDialog(Frame parent, java.util.Set<String> disabledCharacters,
             java.util.Map<String, String> characterOwners) {
+        return showDialog(parent, disabledCharacters, characterOwners, -1);
+    }
+
+    /**
+     * 모달 창을 띄우되 timeoutMs 후 자동으로 닫을 수 있는 헬퍼.
+     */
+    public static String showDialog(Frame parent, java.util.Set<String> disabledCharacters,
+            java.util.Map<String, String> characterOwners, long timeoutMs) {
         CharacterSelectDialog dialog = new CharacterSelectDialog(parent, disabledCharacters, characterOwners);
+
+        javax.swing.Timer autoCloseTimer = null;
+        if (timeoutMs > 0) {
+            int delay = (int) Math.min(Integer.MAX_VALUE, Math.max(1, timeoutMs));
+            autoCloseTimer = new javax.swing.Timer(delay, e -> dialog.dispose());
+            autoCloseTimer.setRepeats(false);
+            autoCloseTimer.start();
+        }
+
         dialog.setVisible(true);
+
+        if (autoCloseTimer != null && autoCloseTimer.isRunning()) {
+            autoCloseTimer.stop();
+        }
+
         return dialog.isConfirmed() ? dialog.getSelectedCharacterId() : null;
     }
 }

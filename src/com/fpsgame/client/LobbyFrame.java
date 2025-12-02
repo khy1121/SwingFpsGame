@@ -97,6 +97,7 @@ public class LobbyFrame extends JFrame {
     private JLabel[] blueSlots = new JLabel[5];
 
     private String selectedMap = "map";
+    private String selectedCharacterId = "raven"; // 기본 캐릭터
 
     private Socket socket;
     private DataOutputStream out;
@@ -533,8 +534,6 @@ public class LobbyFrame extends JFrame {
     }
 
     // 캐릭터 선택 다이얼로그
-    private String selectedCharacterId = null; // 캐릭터 미선택 상태가 기본
-
     private void openCharacterSelect() {
         if (selectedTeam == -1) {
             JOptionPane.showMessageDialog(this,
@@ -734,13 +733,9 @@ public class LobbyFrame extends JFrame {
                 readyButton.setEnabled(true);
             });
 
-            // 플레이어 이름과 캐릭터 ID 전송 (JOIN에 포함)
-            String joinMessage = "JOIN:" + playerName;
-            if (selectedCharacterId != null && !selectedCharacterId.isEmpty()) {
-                joinMessage += ":" + selectedCharacterId;
-                System.out.println("[Lobby] JOIN with character: " + selectedCharacterId);
-            }
-            out.writeUTF(joinMessage);
+            // 플레이어 이름과 캐릭터 ID 전송
+            String charId = (selectedCharacterId != null && !selectedCharacterId.isEmpty()) ? selectedCharacterId : "raven";
+            out.writeUTF("JOIN:" + playerName + ":" + charId);
             out.flush();
 
             // 서버 메시지 수신 스레드 시작 (로비 단계에서만 동작)

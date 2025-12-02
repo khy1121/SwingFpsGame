@@ -253,15 +253,29 @@ public class GameServer {
                     playerInfo.y = 300;
                     playerInfo.hp = GameConstants.MAX_HP;
                     
-                    // characterId가 포함된 경우 설정
+                    // characterId가 포함된 경우 설정, 없거나 유효하지 않으면 거부
                     if (joinParts.length > 1 && joinParts[1] != null && !joinParts[1].trim().isEmpty()) {
                         String joinCharId = joinParts[1].trim().toLowerCase();
-                        playerInfo.characterId = joinCharId;
                         CharacterData cd = CharacterData.getById(joinCharId);
                         if (cd != null) {
+                            playerInfo.characterId = joinCharId;
                             playerInfo.hp = (int) cd.health;
                             System.out.println("[JOIN] " + playerName + " joined with " + joinCharId + " (HP: " + playerInfo.hp + ")");
+                        } else {
+                            sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID 입니다. 다시 선택 후 접속하세요.");
+                            try {
+                                socket.close();
+                            } catch (IOException ignored) {
+                            }
+                            return;
                         }
+                    } else {
+                        sendMessage("CHAT:[시스템] 캐릭터 선택 후 입장 가능합니다.");
+                        try {
+                            socket.close();
+                        } catch (IOException ignored) {
+                        }
+                        return;
                     }
                     clients.put(playerName, this);
                     sendMessage("WELCOME: 서버에 " + playerName + " 님이 연결되었습니다.");
@@ -298,19 +312,33 @@ public class GameServer {
                 case "CHARACTER_SELECT":
                     // 라운드 진행 중일 때만 제한 적용 (로비에서는 무제한)
                     if (currentRoundStartTime > 0) {
-                        long elapsed = System.currentTimeMillis() - currentRoundStartTime;
-                        // 1. 시간 제한 (10초)
-                        if (elapsed > 10000) {
-                            sendMessage("CHAT:[시스템] 라운드 시작 후 10초가 지나 캐릭터를 변경할 수 없습니다.");
+                        long now = System.currentTimeMillis();
+                        long elapsed = now - currentRoundStartTime;
+                        
+                        // 1. 시간 제한 (10초) - 엄격하게 체크
+                        if (elapsed >= 10000) {
+                            sendMessage("CHAT:[시스템] 라운드 시작 후 10초가 지나 캐릭터를 변경할 수 없습니다. (경과: " + (elapsed/1000) + "초)");
+                            System.out.println("[CHARACTER_SELECT_DENIED] " + playerName + " - Time limit exceeded: " + elapsed + "ms");
                             break;
                         }
+                        
                         // 2. 횟수 제한 (라운드당 1회)
                         if (playerCharacterChanged.containsKey(playerName)) {
-                            sendMessage("CHAT:[시스템] 이번 라운드에 이미 캐릭터를 변경했습니다.");
+                            sendMessage("CHAT:[시스템] 이번 라운드에 이미 캐릭터를 변경했습니다. (1회 제한)");
+                            System.out.println("[CHARACTER_SELECT_DENIED] " + playerName + " - Already changed in this round");
                             break;
                         }
+                        
+                        // 3. 라운드 종료 상태 체크
+                        if (roundEnded) {
+                            sendMessage("CHAT:[시스템] 라운드가 종료되어 캐릭터를 변경할 수 없습니다.");
+                            System.out.println("[CHARACTER_SELECT_DENIED] " + playerName + " - Round ended");
+                            break;
+                        }
+                        
                         // 변경 기록
                         playerCharacterChanged.put(playerName, true);
+                        System.out.println("[CHARACTER_SELECT_ALLOWED] " + playerName + " - Elapsed: " + elapsed + "ms");
                     }
 
                     // ===== 단일 소스: characterId 정규화 및 검증 =====
@@ -807,6 +835,7 @@ public class GameServer {
 
         // 범위 내 플레이어에게 데미지 (서버 권위)
         int strikeDamage = 50; // 에어스트라이크 고정 데미지
+        boolean anyKilled = false;
         for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
             ClientHandler ch = e.getValue();
             if (ch.playerInfo == null || ch.playerInfo.hp <= 0)
@@ -820,6 +849,7 @@ public class GameServer {
                 ch.playerInfo.hp -= strikeDamage;
                 if (ch.playerInfo.hp <= 0) {
                     ch.playerInfo.hp = 0;
+                    anyKilled = true;
                     // 스트라이크 호출자 킬 크레딧
                     ClientHandler striker = clients.get(strike.owner);
                     if (striker != null && striker.playerInfo != null && !ch.playerName.equals(strike.owner)) {
@@ -828,10 +858,19 @@ public class GameServer {
                         broadcastStats(strike.owner, striker.playerInfo);
                         striker.sendMessage("KILL:" + ch.playerName);
                         broadcast("CHAT:" + strike.owner + " 님이 에어스트라이크로 " + ch.playerName + " 님을 처치했습니다!", null);
+                    } else {
+                        // 자폭한 경우
+                        ch.playerInfo.deaths++;
+                        broadcast("CHAT:" + ch.playerName + " 님이 에어스트라이크에 사망했습니다!", null);
                     }
                 }
                 broadcastStats(ch.playerName, ch.playerInfo);
             }
+        }
+        
+        // 누군가 죽었다면 라운드 종료 체크
+        if (anyKilled) {
+            checkRoundEnd();
         }
 
         // 범위 내 오브젝트 파괴

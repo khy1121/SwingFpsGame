@@ -3034,14 +3034,14 @@ public class GamePanel extends JFrame implements KeyListener {
         disconnect();
 
         // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
-        final String currentChar = selectedCharacter; // 현재 캐릭터 저장
+        // ?? ?? ? ???? ????? ?? ????? ??
+        final String currentChar = selectedCharacter; // ?? ??? ??
         javax.swing.SwingUtilities.invokeLater(() -> {
-            this.dispose(); // GamePanel이 JFrame이므로 직접 dispose
+            this.dispose(); // GamePanel? JFrame??? ?? dispose
 
-            // 로비 프레임 열기 (선택된 캐릭터 유지)
-            System.out.println("[로비] 백 전환 - 캐릭터 유지: " + currentChar);
+            GameConfig.saveCharacter("");
+            System.out.println("[??] ? ?? - ??? ???, ??: " + currentChar);
             LobbyFrame lobby = new LobbyFrame(playerName);
-            // LobbyFrame에 선택된 캐릭터 정보 전달 (가능하면)
             lobby.setVisible(true);
         });
     }
@@ -3549,9 +3549,25 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void openCharacterSelect() {
-        // 라운드 시작 후 10초(대기시간) 지나면 변경 불가
+        // 1. 라운드 상태 체크 - WAITING 상태가 아니면 변경 불가
         if (roundState != RoundState.WAITING) {
             appendChatMessage("[시스템] 라운드 진행 중에는 캐릭터를 변경할 수 없습니다.");
+            return;
+        }
+
+        // 2. 시간 제한 체크 (10초) - 더 엄격하게
+        long now = System.currentTimeMillis();
+        long elapsed = now - roundStartTime;
+        long remaining = CHARACTER_CHANGE_TIME_LIMIT - elapsed;
+        
+        if (elapsed >= CHARACTER_CHANGE_TIME_LIMIT) {
+            appendChatMessage("[시스템] 캐릭터 변경 가능 시간이 만료되었습니다. (경과: " + (elapsed/1000) + "초)");
+            return;
+        }
+        
+        // 3. 이미 변경했는지 체크
+        if (hasChangedCharacterInRound) {
+            appendChatMessage("[시스템] 이번 라운드에 이미 캐릭터를 변경했습니다. (1회 제한)");
             return;
         }
 
@@ -3560,8 +3576,24 @@ public class GamePanel extends JFrame implements KeyListener {
             timer.stop();
         }
 
-        // 캐릭터 선택 다이얼로그 표시
-        String newCharacter = CharacterSelectDialog.showDialog(this);
+        // 현재 팀에서 이미 선택한 캐릭터를 비활성화 목록으로 구성
+        java.util.Set<String> disabledCharacters = new java.util.HashSet<>();
+        java.util.Map<String, String> characterOwners = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, PlayerData> entry : players.entrySet()) {
+            PlayerData pd = entry.getValue();
+            if (pd != null && pd.team == team && pd.characterId != null) {
+                disabledCharacters.add(pd.characterId);
+                characterOwners.put(pd.characterId, entry.getKey());
+            }
+        }
+        // 내 현재 캐릭터는 비활성화 목록에서 제거해 재선택 가능하게 유지
+        if (selectedCharacter != null) {
+            disabledCharacters.remove(selectedCharacter);
+            characterOwners.remove(selectedCharacter);
+        }
+
+        // 캐릭터 선택 다이얼로그 표시 (남은 시간 지나면 자동 닫힘)
+        String newCharacter = CharacterSelectDialog.showDialog(this, disabledCharacters, characterOwners, remaining);
 
         if (newCharacter != null) {
             selectedCharacter = newCharacter;
@@ -3571,14 +3603,20 @@ public class GamePanel extends JFrame implements KeyListener {
             abilities = CharacterData.createAbilities(selectedCharacter);
             myMaxHP = (int) currentCharacterData.health;
             myHP = myMaxHP;
+            
+            // 변경 플래그 설정 (서버 응답 전에 먼저 설정하여 중복 요청 방지)
+            hasChangedCharacterInRound = true;
 
             // 서버에 캐릭터 변경 알림
             if (out != null) {
                 try {
                     out.writeUTF("CHARACTER_SELECT:" + selectedCharacter);
                     out.flush();
+                    System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
                 } catch (IOException ex) {
                     ex.printStackTrace();
+                    // 실패 시 플래그 되돌림
+                    hasChangedCharacterInRound = false;
                 }
             }
 
