@@ -360,7 +360,6 @@ public class GamePanel extends JFrame implements KeyListener {
             super.paintComponent(g);
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        
 
             // 1. 맵 배경 그리기 (카메라 오프셋 적용)
             if (mapImage != null) {
@@ -1174,6 +1173,10 @@ public class GamePanel extends JFrame implements KeyListener {
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         this.selectedCharacter = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
         this.currentCharacterData = CharacterData.getById(selectedCharacter);
+
+        // HP 초기화 (중요: 캐릭터별 MaxHP 적용)
+        this.myMaxHP = (int) currentCharacterData.health;
+        this.myHP = this.myMaxHP;
 
         // 스킬 초기화
         this.abilities = CharacterData.createAbilities(selectedCharacter);
@@ -2437,14 +2440,18 @@ public class GamePanel extends JFrame implements KeyListener {
                     if (pName.equals(playerName)) {
                         selectedCharacter = charId;
                         myMaxHP = newMaxHp;
-                        myHP = newMaxHp; // HP도 즉시 업데이트
+                        // HP는 서버의 STATS 메시지로 동기화됨 (제거)
                         currentCharacterData = cd;
                         abilities = CharacterData.createAbilities(selectedCharacter);
                         hasChangedCharacterInRound = true;
+                        
+                        // 선택한 캐릭터 저장 (게임 중 변경사항 지속)
+                        GameConfig.saveCharacter(charId);
+                        
                         // 내 스프라이트 재로드
                         loadSprites();
                         // 스프라이트가 제대로 로드되었는지 확인
-                        System.out.println("[DEBUG] 캐릭터 변경: " + charId + ", 스프라이트 로드: " + (myAnimations != null ? myAnimations.length : "null"));
+                        System.out.println("[CHARACTER_SELECT] 캐릭터 변경: " + charId + ", maxHP: " + newMaxHp + ", 현재 HP: " + myHP);
                         repaint();
                         appendChatMessage("[캐릭터] " + cd.name + "으로 변경되었습니다.");
                     } else {
@@ -2463,7 +2470,8 @@ public class GamePanel extends JFrame implements KeyListener {
                         }
                         // 원격 플레이어 스프라이트 로드
                         loadPlayerSprites(pd, charId);
-                        System.out.println("[CHARACTER_SELECT] 원격 플레이어: " + pName + " -> " + charId + ", HP: " + newMaxHp);
+                        System.out.println(
+                                "[CHARACTER_SELECT] 원격 플레이어: " + pName + " -> " + charId + ", HP: " + newMaxHp);
                         appendChatMessage("[캐릭터] " + pName + " -> " + cd.name);
                     }
                 }
@@ -2492,7 +2500,8 @@ public class GamePanel extends JFrame implements KeyListener {
                             players.put(name, pd);
                             // 스프라이트 로드
                             loadPlayerSprites(pd, charId);
-                            System.out.println("[PLAYER] 새 플레이어 생성: " + name + ", 캐릭터: " + charId + ", 방향: " + direction);
+                            System.out
+                                    .println("[PLAYER] 새 플레이어 생성: " + name + ", 캐릭터: " + charId + ", 방향: " + direction);
                         } else {
                             // 보간을 위해 목표 위치 설정 (즉시 이동하지 않음)
                             pd.targetX = x;
@@ -2505,7 +2514,8 @@ public class GamePanel extends JFrame implements KeyListener {
                                 pd.characterId = charId;
                                 pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
                                 loadPlayerSprites(pd, charId);
-                                System.out.println("[PLAYER] 캐릭터 변경: " + name + " -> " + charId + ", maxHP: " + pd.maxHp);
+                                System.out
+                                        .println("[PLAYER] 캐릭터 변경: " + name + " -> " + charId + ", maxHP: " + pd.maxHp);
                             } else if (charId != null) {
                                 // 캐릭터 변경이 없어도 maxHp 업데이트 (동기화 보장)
                                 pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
@@ -2533,50 +2543,40 @@ public class GamePanel extends JFrame implements KeyListener {
                     int k = Integer.parseInt(s[1]);
                     int d = Integer.parseInt(s[2]);
                     int hp = Integer.parseInt(s[3]);
-                    String charId = s.length >= 5 ? s[4] : null;
-                    
+                    // characterId는 포함되어 있으나, 검증용으로만 사용 (절대 캐릭터 변경하지 않음)
+                    // String charId = s.length >= 5 ? s[4] : null; // 읽지만 사용하지 않음
+
                     if (name.equals(playerName)) {
+                        // ===== 내 캐릭터: HP/kills/deaths만 업데이트 =====
                         kills = k;
                         deaths = d;
+                        myHP = hp;
                         
-                        // 캐릭터 ID가 전달된 경우 동기화 (HP 업데이트 전에 먼저 처리)
-                        if (charId != null && !charId.equalsIgnoreCase(selectedCharacter)) {
-                            System.out.println("[STATS 동기화] 캐릭터 변경 감지: " + selectedCharacter + " -> " + charId);
-                            selectedCharacter = charId;
-                            currentCharacterData = com.fpsgame.common.CharacterData.getById(charId);
-                            myMaxHP = (int) currentCharacterData.health;
-                            abilities = CharacterData.createAbilities(selectedCharacter);
-                            loadSprites();
-                            System.out.println("[STATS 동기화] 완료 - 캐릭터: " + charId + ", maxHP: " + myMaxHP);
-                            repaint();
-                        } else if (currentCharacterData != null) {
-                            // 캐릭터 변경이 없어도 maxHP 업데이트
+                        // maxHP는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
+                        if (currentCharacterData != null) {
                             myMaxHP = (int) currentCharacterData.health;
                         }
-                        
-                        // HP 업데이트 (캐릭터 동기화 후)
-                        myHP = hp;
-                        System.out.println("[STATS] 최종 HP: " + myHP + "/" + myMaxHP);
-                        
+
+                        System.out.println("[STATS] " + playerName + " HP: " + myHP + "/" + myMaxHP + " (Character: " + selectedCharacter + ")");
+
+                        // 서버 기준으로 사망 상태면 즉시 리스폰
                         if (myHP <= 0) {
-                            // 서버 기준으로 사망 상태면 즉시 리스폰
                             respawn();
                         }
                     } else {
+                        // ===== 원격 플레이어: HP/kills/deaths만 업데이트 =====
                         PlayerData pd = players.get(name);
                         if (pd != null) {
                             pd.kills = k;
                             pd.deaths = d;
                             pd.hp = hp;
-                            
-                            // 원격 플레이어 캐릭터 동기화
-                            if (charId != null && !charId.equals(pd.characterId)) {
-                                pd.characterId = charId;
-                                com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(charId);
-                                pd.maxHp = (int) cd.health;
-                                loadPlayerSprites(pd, charId);
-                                System.out.println("[STATS 동기화] " + name + " -> " + charId);
+
+                            // maxHp는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
+                            if (pd.characterId != null) {
+                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(pd.characterId).health;
                             }
+                            
+                            System.out.println("[STATS] " + name + " HP: " + pd.hp + "/" + pd.maxHp + " (Character: " + pd.characterId + ")");
                         }
                     }
                 }
@@ -2860,9 +2860,11 @@ public class GamePanel extends JFrame implements KeyListener {
             }
 
             case "ROUND_START": {
-                // ROUND_START:roundNumber,mapId
-                String[] roundParts = data.split(",");
-                if (roundParts.length > 0) {
+                // ROUND_START:roundNumber,mapId;playerCount;name1,charId1,hp1,maxHp1;name2,charId2,hp2,maxHp2;...
+                String[] mainParts = data.split(";", 2);
+                if (mainParts.length >= 1) {
+                    // 기본 라운드 정보 파싱
+                    String[] roundParts = mainParts[0].split(",");
                     roundCount = Integer.parseInt(roundParts[0]);
 
                     // 맵 ID가 포함되어 있으면 새 맵 로드 (별도 스레드에서 처리)
@@ -2870,7 +2872,6 @@ public class GamePanel extends JFrame implements KeyListener {
                         String newMapId = roundParts[1];
                         if (!newMapId.equals(currentMapName)) {
                             final String mapToLoad = newMapId;
-                            // 맵 로딩을 별도 스레드에서 처리하여 메인 스레드 블록 방지
                             new Thread(() -> {
                                 try {
                                     System.out.println("[맵] 로딩 시작: " + mapToLoad);
@@ -2887,6 +2888,63 @@ public class GamePanel extends JFrame implements KeyListener {
                             }, "MapLoader-Thread").start();
                         }
                     }
+
+                    // ===== 라운드 시작 시 서버에서 받은 모든 플레이어 정보로 완전 초기화 =====
+                    if (mainParts.length > 1) {
+                        String[] playerInfo = mainParts[1].split(";");
+                        int playerCount = Integer.parseInt(playerInfo[0]);
+                        
+                        System.out.println("[ROUND_START] Parsing " + playerCount + " players from server");
+                        
+                        for (int i = 1; i <= playerCount && i < playerInfo.length; i++) {
+                            String[] pData = playerInfo[i].split(",");
+                            if (pData.length >= 4) {
+                                String pName = pData[0];
+                                String pCharId = pData[1];
+                                int pHp = Integer.parseInt(pData[2]);
+                                int pMaxHp = Integer.parseInt(pData[3]);
+
+                                System.out.println("[ROUND_START] Player: " + pName + ", Char: " + pCharId + ", HP: " + pHp + "/" + pMaxHp);
+
+                                if (pName.equals(playerName)) {
+                                    // ===== 내 캐릭터 완전 초기화 =====
+                                    selectedCharacter = pCharId;
+                                    currentCharacterData = com.fpsgame.common.CharacterData.getById(pCharId);
+                                    myHP = pHp;
+                                    myMaxHP = pMaxHp;
+                                    
+                                    // 스프라이트 재로딩
+                                    loadSprites();
+                                    
+                                    // 스킬 재설정
+                                    abilities = CharacterData.createAbilities(selectedCharacter);
+                                    if (abilities != null) {
+                                        for (Ability ability : abilities) {
+                                            if (ability != null) {
+                                                ability.resetCooldown();
+                                            }
+                                        }
+                                    }
+                                    
+                                    System.out.println("[ROUND_START] My character initialized: " + pCharId + " HP: " + myHP + "/" + myMaxHP);
+                                } else {
+                                    // ===== 원격 플레이어 완전 초기화 =====
+                                    PlayerData pd = players.get(pName);
+                                    if (pd != null) {
+                                        pd.characterId = pCharId;
+                                        pd.hp = pHp;
+                                        pd.maxHp = pMaxHp;
+                                        
+                                        // 스프라이트 재로딩
+                                        loadPlayerSprites(pd, pCharId);
+                                        
+                                        System.out.println("[ROUND_START] Remote player updated: " + pName + " -> " + pCharId + " HP: " + pHp + "/" + pMaxHp);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     roundState = RoundState.WAITING;
                     roundStartTime = System.currentTimeMillis();
                     centerMessage = "Round " + roundCount + " Ready";
@@ -2895,13 +2953,22 @@ public class GamePanel extends JFrame implements KeyListener {
                     // 라운드 시작 시 캐릭터 변경 플래그 초기화
                     hasChangedCharacterInRound = false;
 
+                    // ===== 스킬 쿨다운 리셋 (라운드 시작 시) =====
+                    if (abilities != null) {
+                        for (Ability ability : abilities) {
+                            if (ability != null) {
+                                ability.resetCooldown();
+                            }
+                        }
+                        System.out.println("[ROUND_START] 모든 스킬 쿨다운 리셋 완료");
+                    }
+
                     // 라운드 시작 시 오브젝트 및 효과 초기화
                     placedObjects.clear();
                     strikeMarkers.clear();
                     if (effectsByPlayer != null) {
                         effectsByPlayer.clear();
                     }
-                    // skillEffects는 별도 초기화 필요 시 추가
 
                     // 리스폰
                     respawn();
@@ -3552,7 +3619,7 @@ public class GamePanel extends JFrame implements KeyListener {
                         break;
                     case "general":
                     case "gen":
-                        spritePath += "General_48_64.png"; 
+                        spritePath += "General_48_64.png";
                         break;
                     default:
                         spritePath += "Raven_48_64.png";
@@ -3613,6 +3680,8 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     private void loadPlayerSprites(PlayerData player, String characterId) {
         try {
+            System.out.println("[SPRITE] 시작: " + characterId + " 스프라이트 로딩...");
+            
             ResourceManager rm = ResourceManager.getInstance();
             player.animations = new SpriteAnimation[4];
 
@@ -3632,17 +3701,18 @@ public class GamePanel extends JFrame implements KeyListener {
                         break;
                     case "general":
                     case "gen":
-                        spritePath += "Genenal_48_64.png"; // 실제 파일명 (철자 오류)
+                        spritePath += "General_48_64.png";
                         break;
                     default:
                         spritePath += "Raven_48_64.png";
+                        System.out.println("[SPRITE] 경고: 알 수 없는 캐릭터 ID '" + characterId + "', Raven으로 대체");
                         break;
                 }
             } else {
                 spritePath += "Raven_48_64.png";
             }
 
-            System.out.println("[SPRITE] Loading player sprite: " + spritePath);
+            System.out.println("[SPRITE] 로딩 경로: " + spritePath);
 
             // 스프라이트 시트 로드 (48x64 크기, 4행 구조: Down, Left, Up, Right)
             java.awt.image.BufferedImage[] walkSheet = rm.getSpriteSheet(spritePath, 48, 64);
@@ -3667,11 +3737,16 @@ public class GamePanel extends JFrame implements KeyListener {
                 player.animations[2] = new SpriteAnimation(leftFrames, 150, true);
                 player.animations[3] = new SpriteAnimation(rightFrames, 150, true);
 
-                System.out.println("[SPRITE] Player animations loaded for " + characterId);
+                System.out.println("[SPRITE] ✅ 성공: " + characterId + " 애니메이션 로드 완료 (4방향)");
+            } else {
+                System.err.println("[SPRITE] ❌ 실패: walkSheet가 null이거나 비어있음");
             }
         } catch (Exception e) {
-            System.out.println("[ERROR] 플레이어 스프라이트 로드 에러: " + e.getMessage());
+            System.err.println("[SPRITE] ❌ 치명적 오류: " + characterId + " 로드 실패");
             e.printStackTrace();
+            
+            // Fallback: 기본 애니메이션 설정 (null 방지)
+            player.animations = null;
         }
     }
 

@@ -245,11 +245,24 @@ public class GameServer {
 
             switch (command) {
                 case "JOIN":
-                    playerName = data;
+                    // JOIN:playerName 또는 JOIN:playerName:characterId 형식 파싱
+                    String[] joinParts = data.split(":");
+                    playerName = joinParts[0];
                     playerInfo = new Protocol.PlayerInfo(clients.size(), playerName);
                     playerInfo.x = 400;
                     playerInfo.y = 300;
                     playerInfo.hp = GameConstants.MAX_HP;
+                    
+                    // characterId가 포함된 경우 설정
+                    if (joinParts.length > 1 && joinParts[1] != null && !joinParts[1].trim().isEmpty()) {
+                        String joinCharId = joinParts[1].trim().toLowerCase();
+                        playerInfo.characterId = joinCharId;
+                        CharacterData cd = CharacterData.getById(joinCharId);
+                        if (cd != null) {
+                            playerInfo.hp = (int) cd.health;
+                            System.out.println("[JOIN] " + playerName + " joined with " + joinCharId + " (HP: " + playerInfo.hp + ")");
+                        }
+                    }
                     clients.put(playerName, this);
                     sendMessage("WELCOME: 서버에 " + playerName + " 님이 연결되었습니다.");
                     broadcast("CHAT:" + playerName + " 님이 게임에 참가했습니다!", playerName);
@@ -257,8 +270,10 @@ public class GameServer {
                     for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
                         ClientHandler ch = e.getValue();
                         if (ch != null && ch.playerInfo != null) {
+                            // characterId 포함하여 STATS 전송
+                            String charId = (ch.playerInfo.characterId != null) ? ch.playerInfo.characterId : "raven";
                             sendMessage("STATS:" + ch.playerName + "," + ch.playerInfo.kills + ","
-                                    + ch.playerInfo.deaths + "," + ch.playerInfo.hp);
+                                    + ch.playerInfo.deaths + "," + ch.playerInfo.hp + "," + charId);
                             // 캐릭터 정보 전송 (있다면)
                             if (ch.playerInfo.characterId != null) {
                                 sendMessage("CHARACTER_SELECT:" + ch.playerName + "," + ch.playerInfo.characterId);
@@ -298,22 +313,26 @@ public class GameServer {
                         playerCharacterChanged.put(playerName, true);
                     }
 
+                    // ===== 단일 소스: playerInfo.characterId 업데이트 =====
                     playerInfo.characterId = data;
 
-                    // 캐릭터별 HP 적용
+                    // 캐릭터별 HP 적용 (maxHP 계산)
                     com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(data);
                     playerInfo.hp = (int) cd.health;
+
+                    System.out.println("[CHARACTER_SELECT] " + playerName + " changed to " + data + " (HP: " + playerInfo.hp + ")");
 
                     // 변경 성공 알림 (본인 및 타인)
                     // CHARACTER_SELECT:playerName,characterId
                     String charSelectMsg = "CHARACTER_SELECT:" + playerName + "," + data;
                     broadcast(charSelectMsg, null);
 
+                    // ===== HP/스탯 즉시 브로드캐스트 (모든 클라이언트 동기화) =====
+                    broadcastStats(playerName, playerInfo);
+                    
                     broadcast("CHAT:" + playerName + " 님이 " + cd.name
                             + " 캐릭터를 선택했습니다!", null);
                     
-                    // HP 변경 사항 즉시 브로드캐스트 (broadcastTeamRoster 전에)
-                    broadcastStats(playerName, playerInfo);
                     broadcastTeamRoster();
                     break;
 
@@ -995,17 +1014,44 @@ public class GameServer {
         // 여기서는 HP만 채워주고 클라이언트에게 라운드 시작 알림
         for (ClientHandler ch : clients.values()) {
             if (ch.playerInfo != null) {
-                // 캐릭터별 최대 HP로 회복
+                // ===== 단일 소스: playerInfo.characterId 기준으로 HP 초기화 =====
                 if (ch.playerInfo.characterId != null) {
                     ch.playerInfo.hp = (int) com.fpsgame.common.CharacterData.getById(ch.playerInfo.characterId).health;
                 } else {
                     ch.playerInfo.hp = GameConstants.MAX_HP;
                 }
-                // 위치는 클라이언트가 스폰 위치로 이동하도록 유도하거나 여기서 강제
+                System.out.println("[ROUND_START] " + ch.playerName + ": " + ch.playerInfo.characterId + " HP=" + ch.playerInfo.hp);
             }
         }
 
-        broadcast("ROUND_START:" + roundCount + "," + selectedMap, null);
+        // ===== ROUND_START 패킷에 모든 플레이어 정보 포함 =====
+        // 형식: ROUND_START:roundNumber,mapId;playerCount;name1,charId1,hp1,maxHp1;name2,charId2,hp2,maxHp2;...
+        StringBuilder roundStartMsg = new StringBuilder();
+        roundStartMsg.append("ROUND_START:").append(roundCount).append(",").append(selectedMap).append(";");
+        roundStartMsg.append(clients.size());
+        
+        for (ClientHandler ch : clients.values()) {
+            if (ch.playerInfo != null) {
+                String charId = (ch.playerInfo.characterId != null) ? ch.playerInfo.characterId : "raven";
+                int maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
+                roundStartMsg.append(";");
+                roundStartMsg.append(ch.playerName).append(",")
+                           .append(charId).append(",")
+                           .append(ch.playerInfo.hp).append(",")
+                           .append(maxHp);
+            }
+        }
+        
+        broadcast(roundStartMsg.toString(), null);
+        System.out.println("[ROUND_START] Broadcasting: " + roundStartMsg.toString());
+        
+        // 각 플레이어에게 최신 스탯 브로드캐스트 (추가 보장)
+        for (ClientHandler ch : clients.values()) {
+            if (ch.playerInfo != null) {
+                broadcastStats(ch.playerName, ch.playerInfo);
+            }
+        }
+        
         broadcastTeamRoster(); // 갱신된 정보 전송
     }
 }

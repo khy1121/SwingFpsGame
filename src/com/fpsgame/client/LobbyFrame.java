@@ -121,6 +121,13 @@ public class LobbyFrame extends JFrame {
         SwingUtilities.invokeLater(() -> {
             connectToServer();
         });
+
+        // 저장된 캐릭터 로드
+        String savedChar = GameConfig.loadCharacter();
+        if (savedChar != null && !savedChar.isEmpty()) {
+            selectedCharacterId = savedChar;
+            System.out.println("[Lobby] Loaded saved character: " + selectedCharacterId);
+        }
     }
 
     private void initUI() {
@@ -559,6 +566,9 @@ public class LobbyFrame extends JFrame {
             appendChat("캐릭터 선택: " + charData.name);
             readyButton.setEnabled(true); // 캐릭터 선택 후 레디 버튼 활성화
 
+            // 선택한 캐릭터 저장
+            GameConfig.saveCharacter(characterId);
+
             // 서버에 캐릭터 선택 전송
             if (out != null) {
                 try {
@@ -724,8 +734,13 @@ public class LobbyFrame extends JFrame {
                 readyButton.setEnabled(true);
             });
 
-            // 플레이어 이름 전송
-            out.writeUTF("JOIN:" + playerName);
+            // 플레이어 이름과 캐릭터 ID 전송 (JOIN에 포함)
+            String joinMessage = "JOIN:" + playerName;
+            if (selectedCharacterId != null && !selectedCharacterId.isEmpty()) {
+                joinMessage += ":" + selectedCharacterId;
+                System.out.println("[Lobby] JOIN with character: " + selectedCharacterId);
+            }
+            out.writeUTF(joinMessage);
             out.flush();
 
             // 서버 메시지 수신 스레드 시작 (로비 단계에서만 동작)
