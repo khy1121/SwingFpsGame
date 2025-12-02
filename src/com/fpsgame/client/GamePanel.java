@@ -949,6 +949,14 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void drawHUD(Graphics2D g) {
+        // ===== currentCharacterData null 체크 및 안전장치 =====
+        if (currentCharacterData == null) {
+            currentCharacterData = CharacterData.getById(selectedCharacter);
+            if (currentCharacterData == null) {
+                currentCharacterData = CharacterData.getById("raven"); // 폴백
+            }
+        }
+        
         // 배경
         g.setColor(new Color(0, 0, 0, 150));
         g.fillRect(10, 10, 250, 160);
@@ -962,11 +970,12 @@ public class GamePanel extends JFrame implements KeyListener {
         yPos += 20;
         g.drawString("팀: " + (team == GameConstants.TEAM_RED ? "RED" : "BLUE"), 20, yPos);
         yPos += 20;
-        g.drawString("캐릭터: " + (currentCharacterData != null ? currentCharacterData.name : selectedCharacter), 20,
-                yPos);
+        
+        // ===== 캐릭터 이름 항상 currentCharacterData에서 가져오기 =====
+        g.drawString("캐릭터: " + currentCharacterData.name, 20, yPos);
         yPos += 20;
 
-        // HP 바
+        // ===== HP 바: 항상 최신 myHP/myMaxHP 사용 =====
         g.drawString("HP: " + myHP + "/" + myMaxHP, 20, yPos);
         drawHealthBar(g, 130, yPos - 12, myHP, myMaxHP);
         yPos += 20;
@@ -976,10 +985,10 @@ public class GamePanel extends JFrame implements KeyListener {
         g.drawString("Kills: " + kills + " / Deaths: " + deaths, 20, yPos);
         yPos += 20;
 
-        // 캐릭터 스탯 표시
+        // ===== 캐릭터 스탯 표시: currentCharacterData 기준 =====
         g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
         g.setColor(new Color(255, 200, 200));
-        g.drawString("HP: " + (int) currentCharacterData.health, 20, yPos);
+        g.drawString("최대HP: " + (int) currentCharacterData.health, 20, yPos);
         yPos += 18;
         g.setColor(new Color(200, 255, 200));
         g.drawString("속도: " + String.format("%.1f", currentCharacterData.speed), 20, yPos);
@@ -2440,8 +2449,9 @@ public class GamePanel extends JFrame implements KeyListener {
                     if (pName.equals(playerName)) {
                         selectedCharacter = charId;
                         myMaxHP = newMaxHp;
-                        // HP는 서버의 STATS 메시지로 동기화됨 (제거)
+                        // HP updated immediately; server STATS will confirm.
                         currentCharacterData = cd;
+                        myHP = newMaxHp;
                         abilities = CharacterData.createAbilities(selectedCharacter);
                         hasChangedCharacterInRound = true;
                         
@@ -3533,11 +3543,7 @@ public class GamePanel extends JFrame implements KeyListener {
         centerMessage = "Round " + roundCount + " Ready";
         centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
 
-        // 랜덤 맵 선택 (첫 라운드 제외, 혹은 매 라운드)
-        if (mapCycle != null && !mapCycle.isEmpty()) {
-            int nextIdx = (int) (Math.random() * mapCycle.size());
-            switchMap(mapCycle.get(nextIdx));
-        }
+        // Map rotation is handled by the server's ROUND_START message; do not switch locally.
 
         respawn(); // 전원 리스폰 위치로
     }
@@ -3563,11 +3569,13 @@ public class GamePanel extends JFrame implements KeyListener {
 
             // 스킬 재로드
             abilities = CharacterData.createAbilities(selectedCharacter);
+            myMaxHP = (int) currentCharacterData.health;
+            myHP = myMaxHP;
 
             // 서버에 캐릭터 변경 알림
             if (out != null) {
                 try {
-                    out.writeUTF("CHARACTER:" + selectedCharacter);
+                    out.writeUTF("CHARACTER_SELECT:" + selectedCharacter);
                     out.flush();
                 } catch (IOException ex) {
                     ex.printStackTrace();

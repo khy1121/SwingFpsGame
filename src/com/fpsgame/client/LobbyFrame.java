@@ -533,7 +533,7 @@ public class LobbyFrame extends JFrame {
     }
 
     // 캐릭터 선택 다이얼로그
-    private String selectedCharacterId = "raven"; // 기본 캐릭터
+    private String selectedCharacterId = null; // 캐릭터 미선택 상태가 기본
 
     private void openCharacterSelect() {
         if (selectedTeam == -1) {

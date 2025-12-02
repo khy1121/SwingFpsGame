@@ -313,18 +313,22 @@ public class GameServer {
                         playerCharacterChanged.put(playerName, true);
                     }
 
-                    // ===== 단일 소스: playerInfo.characterId 업데이트 =====
-                    playerInfo.characterId = data;
+                    // ===== 단일 소스: characterId 정규화 및 검증 =====
+                    String newCharId = (data != null) ? data.trim().toLowerCase() : "";
+                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(newCharId);
+                    if (cd == null) {
+                        sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID 입니다: " + data);
+                        break;
+                    }
 
-                    // 캐릭터별 HP 적용 (maxHP 계산)
-                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(data);
+                    playerInfo.characterId = newCharId;
                     playerInfo.hp = (int) cd.health;
 
-                    System.out.println("[CHARACTER_SELECT] " + playerName + " changed to " + data + " (HP: " + playerInfo.hp + ")");
+                    System.out.println("[CHARACTER_SELECT] " + playerName + " changed to " + newCharId + " (HP: " + playerInfo.hp + ")");
 
                     // 변경 성공 알림 (본인 및 타인)
                     // CHARACTER_SELECT:playerName,characterId
-                    String charSelectMsg = "CHARACTER_SELECT:" + playerName + "," + data;
+                    String charSelectMsg = "CHARACTER_SELECT:" + playerName + "," + newCharId;
                     broadcast(charSelectMsg, null);
 
                     // ===== HP/스탯 즉시 브로드캐스트 (모든 클라이언트 동기화) =====
