@@ -43,11 +43,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private final int SPEED = 5;
     private final boolean[] keys = new boolean[256];
 
-    // 선택된 캐릭터
-    private String selectedCharacter = "raven"; // 기본값
-    private CharacterData currentCharacterData;
-
-    // 스킬 시스템
+    // 스킬 시스템 (매 프레임 update 필요하므로 로컬 유지)
     private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
 
     // 스킬 이펙트 (네트워크 포함)
@@ -155,11 +151,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private JTextField chatInput;
     private JScrollPane chatScroll;
 
-    // 킬/데스 카운터
-    private int kills = 0;
-    private int deaths = 0;
-    private int myHP = GameConstants.MAX_HP;
-    private int myMaxHP = GameConstants.MAX_HP;
+    // 방향 (GameState에 없는 애니메이션용 필드)
     private int myDirection = 0; // 0:Down, 1:Up, 2:Left, 3:Right
     private SpriteAnimation[] myAnimations;
 
@@ -398,12 +390,12 @@ public class GamePanel extends JFrame implements KeyListener {
         ctx.playerY = this.playerY;
         ctx.myDirection = this.myDirection;
         ctx.myAnimations = this.myAnimations;
-        ctx.myHP = this.myHP;
-        ctx.myMaxHP = this.myMaxHP;
+        ctx.myHP = gameState.getMyHP();
+        ctx.myMaxHP = gameState.getMyMaxHP();
         ctx.mouseX = this.mouseX;
         ctx.mouseY = this.mouseY;
-        ctx.selectedCharacter = this.selectedCharacter;
-        ctx.currentCharacterData = this.currentCharacterData;
+        ctx.selectedCharacter = gameState.getSelectedCharacter();
+        ctx.currentCharacterData = gameState.getCurrentCharacterData();
         
         // 게임 오브젝트
         ctx.players = this.players;
@@ -418,8 +410,8 @@ public class GamePanel extends JFrame implements KeyListener {
         // UI 상태
         ctx.showMinimap = this.showMinimap;
         ctx.editMode = this.editMode;
-        ctx.kills = this.kills;
-        ctx.deaths = this.deaths;
+        ctx.kills = gameState.getKills();
+        ctx.deaths = gameState.getDeaths();
         ctx.abilities = this.abilities;
         
         // 라운드 정보
@@ -474,19 +466,18 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
-        this.selectedCharacter = selectedChar;
-        this.currentCharacterData = CharacterData.getById(selectedChar);
+        CharacterData charData = CharacterData.getById(selectedChar);
+        
+        // GameState에 캐릭터 정보 설정
         gameState.setSelectedCharacter(selectedChar);
-        gameState.setCurrentCharacterData(this.currentCharacterData);
+        gameState.setCurrentCharacterData(charData);
 
         // HP 초기화 (중요: 캐릭터별 MaxHP 적용)
-        int maxHp = (int) this.currentCharacterData.health;
-        this.myMaxHP = maxHp;
-        this.myHP = maxHp;
+        int maxHp = (int) charData.health;
         gameState.setMyMaxHP(maxHp);
         gameState.setMyHP(maxHp);
 
-        // 스킬 초기화
+        // 스킬 초기화 (로컬 유지 - 매 프레임 update)
         this.abilities = CharacterData.createAbilities(selectedChar);
         gameState.setAbilities(this.abilities);
 
@@ -1637,7 +1628,7 @@ public class GamePanel extends JFrame implements KeyListener {
             playerX = mapWidth / 2;
             playerY = mapHeight / 2;
         }
-        myHP = myMaxHP;
+        gameState.setMyHP(gameState.getMyMaxHP());
 
         appendChatMessage("[리스폰] 위치: (" + playerX + ", " + playerY + ")");
 
@@ -1715,12 +1706,15 @@ public class GamePanel extends JFrame implements KeyListener {
                     int newMaxHp = (int) cd.health;
 
                     if (pName.equals(playerName)) {
-                        selectedCharacter = charId;
-                        myMaxHP = newMaxHp;
-                        // HP updated immediately; server STATS will confirm.
-                        currentCharacterData = cd;
-                        myHP = newMaxHp;
-                        abilities = CharacterData.createAbilities(selectedCharacter);
+                        // GameState에 캐릭터 정보 설정
+                        gameState.setSelectedCharacter(charId);
+                        gameState.setCurrentCharacterData(cd);
+                        gameState.setMyMaxHP(newMaxHp);
+                        gameState.setMyHP(newMaxHp);
+                        
+                        // 스킬 재생성 (로컬 유지)
+                        abilities = CharacterData.createAbilities(charId);
+                        gameState.setAbilities(abilities);
                         hasChangedCharacterInRound = true;
                         
                         // 선택한 캐릭터 저장 (게임 중 변경사항 지속)
@@ -1729,7 +1723,7 @@ public class GamePanel extends JFrame implements KeyListener {
                         // 내 스프라이트 재로드
                         loadSprites();
                         // 스프라이트가 제대로 로드되었는지 확인
-                        System.out.println("[CHARACTER_SELECT] 캐릭터 변경: " + charId + ", maxHP: " + newMaxHp + ", 현재 HP: " + myHP);
+                        System.out.println("[CHARACTER_SELECT] 캐릭터 변경: " + charId + ", maxHP: " + newMaxHp + ", 현재 HP: " + gameState.getMyHP() + ")");
                         repaint();
                         appendChatMessage("[캐릭터] " + cd.name + "으로 변경되었습니다.");
                     } else {
@@ -1826,19 +1820,20 @@ public class GamePanel extends JFrame implements KeyListener {
 
                     if (name.equals(playerName)) {
                         // ===== 내 캐릭터: HP/kills/deaths만 업데이트 =====
-                        kills = k;
-                        deaths = d;
-                        myHP = hp;
+                        gameState.setKills(k);
+                        gameState.setDeaths(d);
+                        gameState.setMyHP(hp);
                         
                         // maxHP는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
-                        if (currentCharacterData != null) {
-                            myMaxHP = (int) currentCharacterData.health;
+                        CharacterData currentChar = gameState.getCurrentCharacterData();
+                        if (currentChar != null) {
+                            gameState.setMyMaxHP((int) currentChar.health);
                         }
 
-                        System.out.println("[STATS] " + playerName + " HP: " + myHP + "/" + myMaxHP + " (Character: " + selectedCharacter + ")");
+                        System.out.println("[STATS] " + playerName + " HP: " + gameState.getMyHP() + "/" + gameState.getMyMaxHP() + " (Character: " + gameState.getSelectedCharacter() + ")");
 
                         // 서버 기준으로 사망 상태면 즉시 리스폰
-                        if (myHP <= 0) {
+                        if (gameState.getMyHP() <= 0) {
                             respawn();
                         }
                     } else {
@@ -2186,16 +2181,17 @@ public class GamePanel extends JFrame implements KeyListener {
 
                                 if (pName.equals(playerName)) {
                                     // ===== 내 캐릭터 완전 초기화 =====
-                                    selectedCharacter = pCharId;
-                                    currentCharacterData = com.fpsgame.common.CharacterData.getById(pCharId);
-                                    myHP = pHp;
-                                    myMaxHP = pMaxHp;
+                                    gameState.setSelectedCharacter(pCharId);
+                                    gameState.setCurrentCharacterData(com.fpsgame.common.CharacterData.getById(pCharId));
+                                    gameState.setMyHP(pHp);
+                                    gameState.setMyMaxHP(pMaxHp);
                                     
                                     // 스프라이트 재로딩
                                     loadSprites();
                                     
                                     // 스킬 재설정
-                                    abilities = CharacterData.createAbilities(selectedCharacter);
+                                    abilities = CharacterData.createAbilities(pCharId);
+                                    gameState.setAbilities(abilities);
                                     if (abilities != null) {
                                         for (Ability ability : abilities) {
                                             if (ability != null) {
@@ -2204,7 +2200,7 @@ public class GamePanel extends JFrame implements KeyListener {
                                         }
                                     }
                                     
-                                    System.out.println("[ROUND_START] My character initialized: " + pCharId + " HP: " + myHP + "/" + myMaxHP);
+                                    System.out.println("[ROUND_START] My character initialized: " + pCharId + " HP: " + gameState.getMyHP() + "/" + gameState.getMyMaxHP() + ")");
                                 } else {
                                     // ===== 원격 플레이어 완전 초기화 =====
                                     PlayerData pd = players.get(pName);
@@ -2304,7 +2300,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
         // ?? ?? ? ???? ????? ?? ????? ??
-        final String currentChar = selectedCharacter; // ?? ??? ??
+        final String currentChar = gameState.getSelectedCharacter(); // ?? ??? ??
         javax.swing.SwingUtilities.invokeLater(() -> {
             this.dispose(); // GamePanel? JFrame??? ?? dispose
 
@@ -2655,7 +2651,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 // 스킬별 효과 적용
                 applySkillEffect(tactical);
                 addLocalEffect(tactical);
-                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                if ("raven".equalsIgnoreCase(gameState.getSelectedCharacter())) {
                     ravenDashRemaining = Math.max(ravenDashRemaining, tactical.getActiveDuration());
                 }
             }
@@ -2695,7 +2691,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 // 스킬별 효과 적용
                 applySkillEffect(ultimate);
                 addLocalEffect(ultimate);
-                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                if ("raven".equalsIgnoreCase(gameState.getSelectedCharacter())) {
                     ravenOverchargeRemaining = ultimate.getActiveDuration();
                     missileSpeedMultiplier = 1.8f;
                     if (abilities != null && abilities.length > 0) {
@@ -2761,7 +2757,7 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     private void applySkillEffect(Ability ability) {
         // Piper: 마킹/열감지 구현 (미니맵 가시성 확장)
-        if ("piper".equalsIgnoreCase(selectedCharacter)) {
+        if ("piper".equalsIgnoreCase(gameState.getSelectedCharacter())) {
             if ("piper_mark".equalsIgnoreCase(ability.id)) {
                 piperMarkRemaining = ability.getActiveDuration();
                 appendChatMessage("[Piper] 적 표시 활성화 (미니맵 시야 확장)");
@@ -2854,9 +2850,10 @@ public class GamePanel extends JFrame implements KeyListener {
             }
         }
         // 내 현재 캐릭터는 비활성화 목록에서 제거해 재선택 가능하게 유지
-        if (selectedCharacter != null) {
-            disabledCharacters.remove(selectedCharacter);
-            characterOwners.remove(selectedCharacter);
+        String currentChar = gameState.getSelectedCharacter();
+        if (currentChar != null) {
+            disabledCharacters.remove(currentChar);
+            characterOwners.remove(currentChar);
         }
 
         // 캐릭터 선택 다이얼로그 표시 (남은 시간 지나면 자동 닫힘)
@@ -2873,24 +2870,29 @@ public class GamePanel extends JFrame implements KeyListener {
                 return;
             }
             
-            selectedCharacter = newCharacter;
-            currentCharacterData = CharacterData.getById(selectedCharacter);
+            // GameState에 새 캐릭터 설정
+            gameState.setSelectedCharacter(newCharacter);
+            CharacterData newCharData = CharacterData.getById(newCharacter);
+            gameState.setCurrentCharacterData(newCharData);
 
-            // 스킬 재로드
-            abilities = CharacterData.createAbilities(selectedCharacter);
-            myMaxHP = (int) currentCharacterData.health;
-            myHP = myMaxHP;
+            // 스킬 재로드 (로컬 유지)
+            abilities = CharacterData.createAbilities(newCharacter);
+            gameState.setAbilities(abilities);
+            
+            int newMaxHp = (int) newCharData.health;
+            gameState.setMyMaxHP(newMaxHp);
+            gameState.setMyHP(newMaxHp);
             
             // 변경 플래그 설정 (서버 응답 전에 먼저 설정하여 중복 요청 방지)
             hasChangedCharacterInRound = true;
 
             // 서버에 캐릭터 변경 알림
             if (out != null) {
-                networkClient.sendCharacterSelect(selectedCharacter);
-                System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
+                networkClient.sendCharacterSelect(newCharacter);
+                System.out.println("[Client] Character change request sent: " + newCharacter + " at " + elapsed + "ms");
             }
 
-            appendChatMessage("캐릭터를 " + currentCharacterData.name + "으로 변경했습니다.");
+            appendChatMessage("캐릭터를 " + newCharData.name + "으로 변경했습니다.");
 
             // 스프라이트 재로드
             loadSprites();
@@ -2921,8 +2923,9 @@ public class GamePanel extends JFrame implements KeyListener {
 
             // 캐릭터별 스프라이트 시트 경로 결정
             String spritePath = "assets/characters/";
-            if (selectedCharacter != null) {
-                switch (selectedCharacter.toLowerCase()) {
+            String charId = gameState.getSelectedCharacter();
+            if (charId != null) {
+                switch (charId.toLowerCase()) {
                     case "raven":
                         spritePath += "Raven_48_64.png";
                         break;
@@ -2976,7 +2979,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 myAnimations[2] = new SpriteAnimation(leftFrames, 150, true); // Left
                 myAnimations[3] = new SpriteAnimation(rightFrames, 150, true); // Right
 
-                System.out.println("[SPRITE] Walk animations created for " + selectedCharacter);
+                System.out.println("[SPRITE] Walk animations created for " + charId);
             } else {
                 System.out.println("[ERROR] Walk sheet invalid!");
             }
