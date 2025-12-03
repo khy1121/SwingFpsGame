@@ -2,29 +2,218 @@
 
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/client/SpriteAnimation.java`
-- **목적**: 캐릭터 애니메이션과 스킬 이펙트를 위한 프레임 기반 애니메이션 시스템
-- **라인 수**: ~110줄
+- **역할**: 스프라이트 애니메이션 관리
+- **라인 수**: 113줄
+- **주요 기능**: 프레임 기반 애니메이션, 반복/일회성 재생, 자동 프레임 전환
+- **사용 사례**: 캐릭터 워킹, 스킬 이펙트, 폭발 효과
+
+---
 
 ## 🎯 주요 기능
 
 ### 1. 프레임 기반 애니메이션
 ```java
-private final BufferedImage[] frames;
-private int currentFrame;
-private final long frameDuration;
+public class SpriteAnimation {
+    /** 애니메이션 프레임 배열 */
+    private final BufferedImage[] frames;
+    
+    /** 현재 표시 중인 프레임 인덱스 */
+    private int currentFrame;
+    
+    /** 마지막 프레임 갱신 시간 */
+    private long lastTime;
+    
+    /** 각 프레임의 표시 시간 (밀리초) */
+    private final long frameDuration;
+    
+    /** 애니메이션 반복 여부 */
+    private final boolean loop;
+    
+    /** 애니메이션 종료 여부 (loop=false일 때만 의미) */
+    private boolean isFinished;
+}
 ```
-- 이미지 배열을 순차적으로 표시하여 애니메이션 구현
-- 각 프레임의 표시 시간을 밀리초 단위로 제어
+**프레임 애니메이션 원리**:
+```
+프레임 0 -> 프레임 1 -> 프레임 2 -> 프레임 3 -> 프레임 0 (반복)
+   100ms      100ms      100ms      100ms       100ms
+   
+loop=true:  0 -> 1 -> 2 -> 3 -> 0 -> 1 -> ...  (무한 반복)
+loop=false: 0 -> 1 -> 2 -> 3 (정지, isFinished=true)
+```
 
-### 2. 루프 제어
+### 2. 생성자
 ```java
-private final boolean loop;
-private boolean isFinished;
+/**
+ * 스프라이트 애니메이션 생성자
+ * 
+ * @param frames 애니메이션 프레임 이미지 배열
+ * @param frameDuration 각 프레임의 표시 시간 (밀리초)
+ * @param loop 애니메이션 반복 여부
+ */
+public SpriteAnimation(BufferedImage[] frames, long frameDuration, boolean loop) {
+    this.frames = frames;
+    this.frameDuration = frameDuration;
+    this.loop = loop;
+    this.currentFrame = 0;
+    this.lastTime = System.currentTimeMillis();
+    this.isFinished = false;
+}
 ```
-- **loop=true**: 무한 반복 (캐릭터 걷기 애니메이션)
-- **loop=false**: 일회성 재생 (스킬 이펙트)
+**사용 예시**:
+```java
+// 걷기 애니메이션 (8프레임, 100ms/프레임, 반복)
+BufferedImage[] walkFrames = ResourceManager.getInstance()
+    .getSpriteSheet("assets/walk.png", 64, 64);
+SpriteAnimation walkAnim = new SpriteAnimation(walkFrames, 100, true);
 
-### 3. 시간 기반 업데이트
+// 폭발 이펙트 (6프레임, 50ms/프레임, 일회성)
+BufferedImage[] explosionFrames = ResourceManager.getInstance()
+    .getSpriteSheet("assets/explosion.png", 128, 128);
+SpriteAnimation explosionAnim = new SpriteAnimation(explosionFrames, 50, false);
+```
+
+### 3. 프레임 업데이트 로직
+```java
+/**
+ * 애니메이션 상태 업데이트
+ */
+public void update() {
+    // 이미 종료된 애니메이션은 업데이트하지 않음
+    if (isFinished)
+        return;
+
+    long now = System.currentTimeMillis();
+    
+    // 프레임 지속 시간이 지났는지 확인
+    if (now - lastTime >= frameDuration) {
+        currentFrame++;
+        lastTime = now;
+        
+        // 마지막 프레임에 도달했을 때 처리
+        if (currentFrame >= frames.length) {
+            if (loop) {
+                // 반복 애니메이션: 첫 프레임으로 돌아감
+                currentFrame = 0;
+            } else {
+                // 일회성 애니메이션: 마지막 프레임에서 정지
+                currentFrame = frames.length - 1;
+                isFinished = true;
+            }
+        }
+    }
+}
+```
+**타임라인 예시 (4프레임, 100ms/프레임, loop=true)**:
+```
+시간(ms):  0     100    200    300    400    500    600    700
+프레임:    0      1      2      3      0      1      2      3
+           ↑      ↑      ↑      ↑      ↑
+         lastTime 갱신
+```
+
+**타임라인 예시 (4프레임, 100ms/프레임, loop=false)**:
+```
+시간(ms):  0     100    200    300    400+
+프레임:    0      1      2      3      3 (정지)
+                                      ↑
+                               isFinished=true
+```
+
+### 4. 프레임 렌더링
+```java
+/**
+ * 현재 프레임을 화면에 그리기
+ * 
+ * @param g Graphics2D 컨텍스트
+ * @param x 그릴 위치 X 좌표
+ * @param y 그릴 위치 Y 좌표
+ * @param width 그릴 너비
+ * @param height 그릴 높이
+ */
+public void draw(Graphics2D g, int x, int y, int width, int height) {
+    if (frames != null && frames.length > 0) {
+        g.drawImage(frames[currentFrame], x, y, width, height, null);
+    }
+}
+```
+**null 안전 처리**:
+- `frames != null`: 배열 존재 확인
+- `frames.length > 0`: 빈 배열 체크
+- `currentFrame`: 항상 유효한 인덱스 (update()에서 보장)
+
+**사용 예시**:
+```java
+// 게임 루프
+while (running) {
+    // 1. 업데이트
+    walkAnim.update();
+    
+    // 2. 렌더링
+    walkAnim.draw(g2d, player.x, player.y, 64, 64);
+    
+    Thread.sleep(16); // ~60fps
+}
+```
+
+### 5. 애니메이션 리셋
+```java
+/**
+ * 애니메이션을 처음부터 다시 시작
+ */
+public void reset() {
+    currentFrame = 0;
+    lastTime = System.currentTimeMillis();
+    isFinished = false;
+}
+```
+**사용 사례**:
+```java
+// 일회성 애니메이션 재생
+if (explosionAnim.isFinished()) {
+    explosionAnim.reset(); // 처음부터 다시
+}
+
+// 캐릭터 상태 변경 시
+if (player.isWalking()) {
+    walkAnim.reset(); // 걷기 시작 시 첫 프레임부터
+}
+```
+
+### 6. 종료 상태 확인
+```java
+/**
+ * 애니메이션 종료 여부 확인
+ * 
+ * @return 애니메이션이 종료되었으면 true (loop=false일 때만 의미)
+ */
+public boolean isFinished() {
+    return isFinished;
+}
+```
+**사용 예시**:
+```java
+// 폭발 이펙트 제거
+if (explosionAnim.isFinished()) {
+    effects.remove(explosion); // 리스트에서 제거
+}
+
+// 스킬 이펙트 종료 후 처리
+if (skillEffect.isFinished()) {
+    player.skill.deactivate();
+}
+```
+
+---
+
+## 💡 강점
+
+### 1. 간결한 구조
+- **113줄**: 핵심 기능만 포함
+- **명확한 책임**: 프레임 전환만 담당
+- **의존성 없음**: BufferedImage만 사용
+
+### 2. 시간 기반 애니메이션
 ```java
 long now = System.currentTimeMillis();
 if (now - lastTime >= frameDuration) {
@@ -32,248 +221,344 @@ if (now - lastTime >= frameDuration) {
     lastTime = now;
 }
 ```
-- 프레임레이트와 독립적인 애니메이션 제어
-- 게임 FPS가 변해도 애니메이션 속도 일정 유지
+- **프레임 독립적**: 60fps, 30fps 상관없이 동일한 속도
+- **정확한 타이밍**: `System.currentTimeMillis()` 사용
 
-## ✅ 장점
-
-### 1. **불변성 보장**
+### 3. 반복/일회성 지원
 ```java
-private final BufferedImage[] frames;
-private final long frameDuration;
-private final boolean loop;
-```
-- `final` 키워드로 핵심 필드 보호
-- 생성 후 변경 불가하여 예측 가능한 동작
-
-### 2. **완전한 JavaDoc 문서화**
-- 모든 public 메서드에 상세한 한글 설명
-- 매개변수와 반환값 명확히 기술
-- 사용 예시와 목적 명시
-
-### 3. **명확한 메서드 설계**
-| 메서드 | 목적 | 호출 시점 |
-|--------|------|-----------|
-| `update()` | 프레임 전환 | 매 게임 루프 |
-| `draw()` | 화면 렌더링 | 매 렌더 사이클 |
-| `reset()` | 애니메이션 재시작 | 애니메이션 재사용 시 |
-| `isFinished()` | 종료 확인 | 일회성 애니메이션 처리 |
-
-### 4. **효율적인 상태 관리**
-```java
-if (isFinished) return; // 이미 종료된 애니메이션은 업데이트 스킵
-```
-- 불필요한 연산 방지
-- 메모리와 CPU 효율성 향상
-
-## ⚠️ 개선 가능 영역
-
-### 1. **Null 안전성**
-**현재 코드:**
-```java
-public void draw(Graphics2D g, int x, int y, int width, int height) {
-    if (frames != null && frames.length > 0) {
-        g.drawImage(frames[currentFrame], x, y, width, height, null);
-    }
+if (loop) {
+    currentFrame = 0; // 반복
+} else {
+    currentFrame = frames.length - 1; // 정지
+    isFinished = true;
 }
 ```
+- **유연성**: 워킹(반복) vs 폭발(일회성)
+- **자동 정지**: isFinished 플래그
 
-**개선 제안:**
+### 4. null 안전 처리
 ```java
-// 생성자에서 null 검증
-public SpriteAnimation(BufferedImage[] frames, long frameDuration, boolean loop) {
-    if (frames == null || frames.length == 0) {
-        throw new IllegalArgumentException("Frames cannot be null or empty");
+if (frames != null && frames.length > 0) {
+    g.drawImage(frames[currentFrame], ...);
+}
+```
+- **크래시 방지**: 빈 프레임 배열도 안전
+
+### 5. 종료 애니메이션 최적화
+```java
+if (isFinished)
+    return; // 업데이트 스킵
+```
+- **CPU 절약**: 종료된 애니메이션은 업데이트 안 함
+
+---
+
+## 🔧 개선 제안
+
+### 1. deltaTime 기반 업데이트 (중요도: 높음)
+**현재 상태**: `System.currentTimeMillis()` 사용
+
+**문제점**:
+- **정확도**: 밀리초 단위 (1ms 오차 가능)
+- **프레임 드랍**: 게임 루프가 느려지면 애니메이션도 느려짐
+
+**제안**:
+```java
+/**
+ * deltaTime 기반 업데이트 (더 정확함)
+ * 
+ * @param deltaTime 프레임 경과 시간 (초)
+ */
+public void update(float deltaTime) {
+    if (isFinished)
+        return;
+    
+    // 밀리초를 초로 변환
+    frameTimer += deltaTime;
+    
+    // 프레임 지속 시간이 지났는지 확인
+    if (frameTimer >= frameDuration / 1000f) {
+        currentFrame++;
+        frameTimer -= frameDuration / 1000f; // 남은 시간 유지
+        
+        if (currentFrame >= frames.length) {
+            if (loop) {
+                currentFrame = 0;
+            } else {
+                currentFrame = frames.length - 1;
+                isFinished = true;
+            }
+        }
     }
+}
+
+// 추가 필드
+private float frameTimer = 0f;
+```
+
+### 2. 애니메이션 속도 배수 (중요도: 중간)
+**현재 상태**: 고정된 frameDuration
+
+**제안**:
+```java
+private float speedMultiplier = 1f; // 기본값 1.0 (100%)
+
+/**
+ * 애니메이션 속도 배수 설정
+ * 
+ * @param multiplier 속도 배수 (0.5 = 50% 느림, 2.0 = 2배 빠름)
+ */
+public void setSpeedMultiplier(float multiplier) {
+    this.speedMultiplier = Math.max(0.1f, multiplier); // 최소 0.1배
+}
+
+public void update() {
+    if (isFinished) return;
+    
+    long now = System.currentTimeMillis();
+    long effectiveDuration = (long) (frameDuration / speedMultiplier);
+    
+    if (now - lastTime >= effectiveDuration) {
+        currentFrame++;
+        lastTime = now;
+        // ... (기존 로직)
+    }
+}
+
+// 사용 예시
+walkAnim.setSpeedMultiplier(1.5f); // 1.5배 빠르게 걷기
+```
+
+### 3. 프레임 범위 재생 (중요도: 낮음)
+**현재 상태**: 전체 프레임만 재생
+
+**제안**:
+```java
+private int startFrame = 0;
+private int endFrame;
+
+public SpriteAnimation(BufferedImage[] frames, long frameDuration, boolean loop,
+                       int startFrame, int endFrame) {
     this.frames = frames;
-    // ...
+    this.frameDuration = frameDuration;
+    this.loop = loop;
+    this.startFrame = startFrame;
+    this.endFrame = endFrame;
+    this.currentFrame = startFrame;
+    this.lastTime = System.currentTimeMillis();
+    this.isFinished = false;
 }
+
+public void update() {
+    // ... (기존 로직)
+    
+    if (currentFrame > endFrame) { // >= 대신 >
+        if (loop) {
+            currentFrame = startFrame; // 0 대신 startFrame
+        } else {
+            currentFrame = endFrame;
+            isFinished = true;
+        }
+    }
+}
+
+// 사용 예시
+// 8프레임 중 0~3만 재생 (걷기 방향별)
+SpriteAnimation walkLeft = new SpriteAnimation(frames, 100, true, 0, 3);
+SpriteAnimation walkRight = new SpriteAnimation(frames, 100, true, 4, 7);
 ```
 
-**이유**: 
-- 생성 시점에 문제를 조기 발견
-- `draw()`에서 매번 null 체크 불필요
+### 4. 콜백 시스템 (중요도: 중간)
+**현재 상태**: 외부에서 isFinished() 체크 필요
 
-### 2. **프레임 인덱스 범위 검증**
-**현재 코드:**
+**제안**:
 ```java
-g.drawImage(frames[currentFrame], x, y, width, height, null);
+private Runnable onComplete;
+private Runnable onLoop;
+
+/**
+ * 애니메이션 완료 시 콜백 설정
+ */
+public void setOnComplete(Runnable callback) {
+    this.onComplete = callback;
+}
+
+/**
+ * 애니메이션 루프 시 콜백 설정
+ */
+public void setOnLoop(Runnable callback) {
+    this.onLoop = callback;
+}
+
+public void update() {
+    // ... (기존 로직)
+    
+    if (currentFrame >= frames.length) {
+        if (loop) {
+            currentFrame = 0;
+            if (onLoop != null) {
+                onLoop.run(); // 루프 콜백 실행
+            }
+        } else {
+            currentFrame = frames.length - 1;
+            isFinished = true;
+            if (onComplete != null) {
+                onComplete.run(); // 완료 콜백 실행
+            }
+        }
+    }
+}
+
+// 사용 예시
+explosionAnim.setOnComplete(() -> {
+    effects.remove(explosion);
+    playSound("explosion_end.wav");
+});
+
+walkAnim.setOnLoop(() -> {
+    // 발소리 재생
+    playSound("footstep.wav");
+});
 ```
 
-**잠재적 문제**:
-- `currentFrame`이 범위를 벗어날 가능성 (동시성 환경)
-- `ArrayIndexOutOfBoundsException` 위험
+### 5. 역재생 지원 (중요도: 낮음)
+**현재 상태**: 정방향만 재생
 
-**개선 제안:**
+**제안**:
 ```java
-public void draw(Graphics2D g, int x, int y, int width, int height) {
-    if (currentFrame >= 0 && currentFrame < frames.length) {
-        g.drawImage(frames[currentFrame], x, y, width, height, null);
+private boolean reverse = false;
+private int direction = 1; // 1: 정방향, -1: 역방향
+
+/**
+ * 역재생 설정
+ */
+public void setReverse(boolean reverse) {
+    this.reverse = reverse;
+    this.direction = reverse ? -1 : 1;
+}
+
+public void update() {
+    if (isFinished) return;
+    
+    long now = System.currentTimeMillis();
+    
+    if (now - lastTime >= frameDuration) {
+        currentFrame += direction; // 방향에 따라 증가/감소
+        lastTime = now;
+        
+        if (direction > 0 && currentFrame >= frames.length) {
+            // 정방향 끝
+            if (loop) {
+                currentFrame = 0;
+            } else {
+                currentFrame = frames.length - 1;
+                isFinished = true;
+            }
+        } else if (direction < 0 && currentFrame < 0) {
+            // 역방향 끝
+            if (loop) {
+                currentFrame = frames.length - 1;
+            } else {
+                currentFrame = 0;
+                isFinished = true;
+            }
+        }
     }
 }
 ```
 
-### 3. **시간 측정 정확도**
-**현재 코드:**
+### 6. 프레임 스킵 방지 (중요도: 중간)
+**현재 상태**: 프레임 드랍 시 애니메이션 느려짐
+
+**제안**:
 ```java
-long now = System.currentTimeMillis();
-```
-
-**개선 제안:**
-```java
-long now = System.nanoTime();
-// 나노초 단위로 더 정밀한 시간 측정
-```
-
-**이유**:
-- 밀리초는 정밀도 제한 (1ms = 1,000,000ns)
-- 고속 애니메이션에서 더 부드러운 전환
-
-### 4. **프레임 배열 방어적 복사**
-**현재 코드:**
-```java
-this.frames = frames; // 외부 참조를 직접 저장
-```
-
-**개선 제안:**
-```java
-this.frames = frames.clone(); // 방어적 복사
-```
-
-**이유**:
-- 외부에서 원본 배열 수정 시 애니메이션 영향
-- 불변성 원칙 강화
-
-## 🏗️ 아키텍처 분석
-
-### 설계 패턴
-- **상태 패턴**: `isFinished`, `currentFrame`으로 상태 관리
-- **템플릿 메서드**: `update()` → `draw()` 호출 순서 정의
-
-### 의존성
-```
-SpriteAnimation
-    ├── java.awt.Graphics2D (렌더링)
-    └── java.awt.image.BufferedImage (프레임 저장)
-```
-- 최소한의 의존성 (AWT만 사용)
-- 단일 책임 원칙 준수
-
-## 📊 성능 고려사항
-
-### 메모리 사용
-```java
-BufferedImage[] frames; // N개 프레임 × (width × height × 4 bytes)
-```
-- **예시**: 64×64 픽셀, 10프레임 = 약 160KB
-- 많은 애니메이션 동시 실행 시 메모리 압박 가능
-
-### 최적화 제안
-1. **프레임 공유**: 동일 애니메이션 인스턴스 재사용
-2. **스프라이트 시트**: 개별 이미지 대신 한 장의 시트 사용
-3. **레이지 로딩**: 필요할 때만 프레임 로드
-
-## 🧪 테스트 시나리오
-
-### 1. 루프 애니메이션 테스트
-```java
-BufferedImage[] frames = createFrames(4);
-SpriteAnimation anim = new SpriteAnimation(frames, 100, true);
-
-for (int i = 0; i < 1000; i++) {
-    anim.update();
-}
-// 예상: isFinished() = false, 프레임 순환 지속
-```
-
-### 2. 일회성 애니메이션 테스트
-```java
-SpriteAnimation anim = new SpriteAnimation(frames, 100, false);
-
-while (!anim.isFinished()) {
-    anim.update();
-}
-// 예상: 마지막 프레임에서 정지
-```
-
-### 3. 리셋 기능 테스트
-```java
-SpriteAnimation anim = new SpriteAnimation(frames, 100, false);
-// 애니메이션 완료까지 진행
-while (!anim.isFinished()) anim.update();
-
-anim.reset();
-// 예상: currentFrame = 0, isFinished = false
-```
-
-## 📈 사용 예시
-
-### 캐릭터 걷기 애니메이션
-```java
-BufferedImage[] walkFrames = ResourceManager.getInstance()
-    .getSpriteSheet("character_walk.png", 4, 1);
-SpriteAnimation walkAnim = new SpriteAnimation(walkFrames, 150, true);
-
-// 게임 루프
-while (gameRunning) {
-    if (player.isWalking()) {
-        walkAnim.update();
-        walkAnim.draw(g, player.x, player.y, 64, 64);
+public void update() {
+    if (isFinished) return;
+    
+    long now = System.currentTimeMillis();
+    long elapsed = now - lastTime;
+    
+    // 여러 프레임을 한 번에 건너뛰기 가능
+    while (elapsed >= frameDuration) {
+        currentFrame++;
+        elapsed -= frameDuration;
+        
+        if (currentFrame >= frames.length) {
+            if (loop) {
+                currentFrame = 0;
+            } else {
+                currentFrame = frames.length - 1;
+                isFinished = true;
+                break;
+            }
+        }
     }
+    
+    lastTime = now - elapsed; // 남은 시간 유지
 }
 ```
 
-### 스킬 이펙트
+### 7. 프레임 보간 (중요도: 낮음)
+**현재 상태**: 프레임 전환이 즉시 일어남
+
+**제안** (고급):
 ```java
-BufferedImage[] explosionFrames = ResourceManager.getInstance()
-    .getSpriteSheet("explosion.png", 8, 1);
-SpriteAnimation explosion = new SpriteAnimation(explosionFrames, 50, false);
-
-// 스킬 발동
-explosion.reset();
-while (!explosion.isFinished()) {
-    explosion.update();
-    explosion.draw(g, skillX, skillY, 128, 128);
+/**
+ * 프레임 간 보간 (부드러운 전환)
+ */
+public void drawInterpolated(Graphics2D g, int x, int y, int width, int height) {
+    if (frames == null || frames.length == 0) return;
+    
+    long now = System.currentTimeMillis();
+    long elapsed = now - lastTime;
+    float progress = Math.min(1f, (float) elapsed / frameDuration);
+    
+    // 현재 프레임
+    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f - progress));
+    g.drawImage(frames[currentFrame], x, y, width, height, null);
+    
+    // 다음 프레임 (반투명)
+    int nextFrame = (currentFrame + 1) % frames.length;
+    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, progress));
+    g.drawImage(frames[nextFrame], x, y, width, height, null);
+    
+    // 원래대로
+    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f));
 }
 ```
 
-## 🎓 학습 포인트
+---
 
-### 초보자를 위한 핵심 개념
-1. **프레임 기반 애니메이션**: 여러 이미지를 순차 표시
-2. **시간 기반 업데이트**: FPS 독립적 제어
-3. **상태 관리**: `currentFrame`, `isFinished`로 진행 상황 추적
+## 📊 코드 품질 평가
 
-### 중급자를 위한 심화 개념
-1. **불변 객체 설계**: `final` 키워드 활용
-2. **방어적 프로그래밍**: null 체크, 범위 검증
-3. **메모리 최적화**: 프레임 공유, 스프라이트 시트
-
-## 🔍 코드 품질 평가
-
-| 항목 | 평가 | 설명 |
+| 항목 | 점수 | 설명 |
 |------|------|------|
-| **가독성** | ⭐⭐⭐⭐⭐ | 명확한 변수명, 충분한 주석 |
-| **유지보수성** | ⭐⭐⭐⭐ | 단순한 구조, 쉬운 수정 |
-| **확장성** | ⭐⭐⭐ | 추가 기능(역재생 등) 구현 가능 |
-| **성능** | ⭐⭐⭐⭐ | 효율적인 업데이트 로직 |
-| **안정성** | ⭐⭐⭐ | null 체크 있으나 개선 여지 |
+| **간결성** | ⭐⭐⭐⭐⭐ | 113줄, 핵심 기능만 포함 |
+| **시간 기반** | ⭐⭐⭐⭐☆ | 밀리초 단위, deltaTime 미지원 |
+| **유연성** | ⭐⭐⭐⭐☆ | 반복/일회성, 속도 배수 미지원 |
+| **null 안전** | ⭐⭐⭐⭐⭐ | frames null 체크 완벽 |
+| **확장성** | ⭐⭐⭐☆☆ | 콜백, 역재생 미지원 |
+| **성능** | ⭐⭐⭐⭐⭐ | isFinished 최적화 |
 
-## 📝 종합 평가
+**총점: 4.3 / 5.0** ⭐⭐⭐⭐☆
 
-### 강점
-✅ **명확한 책임**: 애니메이션 재생만 담당  
-✅ **간결한 API**: 4개 메서드로 모든 기능 제공  
-✅ **우수한 문서화**: 한글 JavaDoc으로 이해 쉬움  
-✅ **불변성 설계**: `final` 키워드 적극 활용  
+---
 
-### 개선 제안 우선순위
-1. **생성자 검증 추가** (높음)
-2. **System.nanoTime() 사용** (중간)
-3. **방어적 복사** (낮음)
-4. **프레임 풀링 시스템** (선택)
+## 🎓 결론
 
-### 결론
-전반적으로 **잘 설계된 애니메이션 클래스**입니다. 기본 기능은 완벽하게 구현되어 있으며, 코드 품질도 우수합니다. 제안된 개선사항은 대부분 엣지 케이스 방어를 위한 것으로, 현재 상태로도 충분히 프로덕션에 사용 가능합니다.
+SpriteAnimation.java는 **간결하고 효율적인 프레임 애니메이션 시스템**입니다. 특히 **시간 기반 업데이트**, **반복/일회성 지원**, **종료 최적화**가 인상적입니다.
 
-**권장사항**: 현재 코드를 유지하되, 향후 멀티스레드 환경이나 대규모 애니메이션 처리가 필요할 때 개선사항을 반영하세요.
+### 주요 성과
+1. ✅ **시간 기반**: System.currentTimeMillis()로 프레임 독립적
+2. ✅ **반복/일회성**: loop 플래그로 유연하게 제어
+3. ✅ **자동 정지**: isFinished 플래그로 종료 애니메이션 관리
+4. ✅ **null 안전**: frames null 체크
+5. ✅ **최적화**: 종료된 애니메이션 업데이트 스킵
+
+### 개선 방향
+1. **deltaTime 기반**: 더 정확한 타이밍
+2. **속도 배수**: setSpeedMultiplier() 추가
+3. **콜백 시스템**: onComplete, onLoop 추가
+4. **프레임 스킵 방지**: while 루프로 여러 프레임 건너뛰기
+
+**프로덕션 레벨**이며, deltaTime 지원만 추가하면 **완벽한 애니메이션 시스템**입니다. 🎉

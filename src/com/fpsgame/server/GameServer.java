@@ -16,24 +16,24 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class GameServer {
 
-    private ServerSocket serverSocket;
-    private Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
+    private final ServerSocket serverSocket;
+    private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private boolean running = true;
 
     // 설치형 오브젝트 (지뢰, 터렛 등)
-    private Map<Integer, PlacedObject> placedObjects = new ConcurrentHashMap<>();
-    private AtomicInteger nextPlacedObjectId = new AtomicInteger(1);
+    private final Map<Integer, PlacedObject> placedObjects = new ConcurrentHashMap<>();
+    private final AtomicInteger nextPlacedObjectId = new AtomicInteger(1);
 
-    private Timer turretAttackTimer;
+    private final Timer turretAttackTimer;
     private static final int TURRET_RANGE = 180;
     private static final int TURRET_ATTACK_INTERVAL = 900; // ms
 
     // 활성 오라 (gen_aura)
-    private Map<String, ActiveAura> activeAuras = new ConcurrentHashMap<>();
+    private final Map<String, ActiveAura> activeAuras = new ConcurrentHashMap<>();
 
     // 에어스트라이크 (gen_strike)
-    private Map<Integer, ScheduledStrike> scheduledStrikes = new ConcurrentHashMap<>();
-    private AtomicInteger nextStrikeId = new AtomicInteger(1);
+    private final Map<Integer, ScheduledStrike> scheduledStrikes = new ConcurrentHashMap<>();
+    private final AtomicInteger nextStrikeId = new AtomicInteger(1);
 
     // 라운드 시스템
     private int roundCount = 0;
@@ -220,14 +220,21 @@ public class GameServer {
                     socket.setKeepAlive(true);
                     socket.setSendBufferSize(64 * 1024);
                     socket.setReceiveBufferSize(64 * 1024);
-                } catch (Exception ignore) {
+                } catch (java.net.SocketException ignore) {
+                    // 소켓 옵션 설정 실패 시 무시하고 계속
                 }
                 out = new DataOutputStream(socket.getOutputStream());
                 in = new DataInputStream(socket.getInputStream());
 
                 while (true) {
                     String message = in.readUTF();
-                    processMessage(message);
+                    try {
+                        processMessage(message);
+                    } catch (Exception ex) {
+                        System.err.println("[ERROR] processMessage 실패 (" + playerName + "): " + message);
+                        ex.printStackTrace();
+                        // 계속 진행 (연결은 유지)
+                    }
                 }
             } catch (IOException e) {
                 System.out.println("클라이언트 연결 끊김: " + playerName);
@@ -248,35 +255,49 @@ public class GameServer {
                     // JOIN:playerName 또는 JOIN:playerName:characterId 형식 파싱
                     String[] joinParts = data.split(":");
                     playerName = joinParts[0];
-                    playerInfo = new Protocol.PlayerInfo(clients.size(), playerName);
-                    playerInfo.x = 400;
-                    playerInfo.y = 300;
-                    playerInfo.hp = GameConstants.MAX_HP;
                     
-                    // characterId가 포함된 경우 설정, 없거나 유효하지 않으면 거부
-                    if (joinParts.length > 1 && joinParts[1] != null && !joinParts[1].trim().isEmpty()) {
-                        String joinCharId = joinParts[1].trim().toLowerCase();
-                        CharacterData cd = CharacterData.getById(joinCharId);
-                        if (cd != null) {
-                            playerInfo.characterId = joinCharId;
-                            playerInfo.hp = (int) cd.health;
-                            System.out.println("[JOIN] " + playerName + " joined with " + joinCharId + " (HP: " + playerInfo.hp + ")");
-                        } else {
-                            sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID 입니다. 다시 선택 후 접속하세요.");
-                            try {
-                                socket.close();
-                            } catch (IOException ignored) {
-                            }
-                            return;
-                        }
-                    } else {
-                        sendMessage("CHAT:[시스템] 캐릭터 선택 후 입장 가능합니다.");
+                    // 플레이어 이름 검증
+                    if (playerName == null || playerName.trim().isEmpty()) {
+                        sendMessage("CHAT:[시스템] 유효하지 않은 플레이어 이름입니다.");
                         try {
                             socket.close();
                         } catch (IOException ignored) {
                         }
                         return;
                     }
+                    
+                    playerInfo = new Protocol.PlayerInfo(clients.size(), playerName);
+                    playerInfo.x = 400;
+                    playerInfo.y = 300;
+                    
+                    // 캐릭터 선택 필수 검증
+                    if (joinParts.length <= 1 || joinParts[1] == null || joinParts[1].trim().isEmpty()) {
+                        sendMessage("CHAT:[시스템] 캐릭터를 선택한 후 입장해주세요.");
+                        System.out.println("[JOIN_REJECTED] " + playerName + " - No character selected");
+                        try {
+                            socket.close();
+                        } catch (IOException ignored) {
+                        }
+                        return;
+                    }
+                    
+                    // 캐릭터 ID 검증
+                    String joinCharId = joinParts[1].trim().toLowerCase();
+                    CharacterData cd = CharacterData.getById(joinCharId);
+                    if (cd == null) {
+                        sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID입니다: " + joinCharId);
+                        System.out.println("[JOIN_REJECTED] " + playerName + " - Invalid character ID: " + joinCharId);
+                        try {
+                            socket.close();
+                        } catch (IOException ignored) {
+                        }
+                        return;
+                    }
+                    
+                    // 캐릭터 설정
+                    playerInfo.characterId = joinCharId;
+                    playerInfo.hp = (int) cd.health;
+                    System.out.println("[JOIN_SUCCESS] " + playerName + " joined with " + joinCharId + " (HP: " + playerInfo.hp + ")");
                     clients.put(playerName, this);
                     sendMessage("WELCOME: 서버에 " + playerName + " 님이 연결되었습니다.");
                     broadcast("CHAT:" + playerName + " 님이 게임에 참가했습니다!", playerName);
@@ -310,6 +331,25 @@ public class GameServer {
                     break;
 
                 case "CHARACTER_SELECT":
+                    // data = newCharacterId
+                    if (playerInfo == null)
+                        break;
+                        
+                    // 캐릭터 ID 검증
+                    if (data == null || data.trim().isEmpty()) {
+                        sendMessage("CHAT:[시스템] 캐릭터를 선택해주세요.");
+                        System.out.println("[CHARACTER_SELECT_REJECTED] " + playerName + " - Empty character ID");
+                        break;
+                    }
+                    
+                    String newCharId = data.trim().toLowerCase();
+                    CharacterData newCharData = CharacterData.getById(newCharId);
+                    if (newCharData == null) {
+                        sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID입니다: " + data);
+                        System.out.println("[CHARACTER_SELECT_REJECTED] " + playerName + " - Invalid character ID: " + data);
+                        break;
+                    }
+                    
                     // 라운드 진행 중일 때만 제한 적용 (로비에서는 무제한)
                     if (currentRoundStartTime > 0) {
                         long now = System.currentTimeMillis();
@@ -341,16 +381,9 @@ public class GameServer {
                         System.out.println("[CHARACTER_SELECT_ALLOWED] " + playerName + " - Elapsed: " + elapsed + "ms");
                     }
 
-                    // ===== 단일 소스: characterId 정규화 및 검증 =====
-                    String newCharId = (data != null) ? data.trim().toLowerCase() : "";
-                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(newCharId);
-                    if (cd == null) {
-                        sendMessage("CHAT:[시스템] 잘못된 캐릭터 ID 입니다: " + data);
-                        break;
-                    }
-
+                    // 캐릭터 변경
                     playerInfo.characterId = newCharId;
-                    playerInfo.hp = (int) cd.health;
+                    playerInfo.hp = (int) newCharData.health;
 
                     System.out.println("[CHARACTER_SELECT] " + playerName + " changed to " + newCharId + " (HP: " + playerInfo.hp + ")");
 
@@ -362,7 +395,7 @@ public class GameServer {
                     // ===== HP/스탯 즉시 브로드캐스트 (모든 클라이언트 동기화) =====
                     broadcastStats(playerName, playerInfo);
                     
-                    broadcast("CHAT:" + playerName + " 님이 " + cd.name
+                    broadcast("CHAT:" + playerName + " 님이 " + newCharData.name
                             + " 캐릭터를 선택했습니다!", null);
                     
                     broadcastTeamRoster();
@@ -496,6 +529,9 @@ public class GameServer {
                         }
                         int dmg = resolveBasicDamage(this.playerInfo.characterId);
                         target.playerInfo.hp -= dmg;
+                        System.out.println("[HIT] " + playerName + " hit " + hitPlayer + 
+                            " (damage: " + dmg + ", remaining HP: " + target.playerInfo.hp + ")");
+                        
                         if (target.playerInfo.hp <= 0) {
                             target.playerInfo.hp = 0;
                             sendMessage("KILL:" + hitPlayer);
@@ -503,7 +539,7 @@ public class GameServer {
                             target.playerInfo.deaths++;
                             broadcastStats(this.playerName, this.playerInfo);
                             broadcastStats(hitPlayer, target.playerInfo);
-                            broadcast("CHAT:" + hitPlayer + " 님이 " + playerName + " 님을 처치했습니다!", null);
+                            broadcast("CHAT:" + playerName + " 님이 " + hitPlayer + " 님을 처치했습니다!", null);
                         } else {
                             broadcastStats(hitPlayer, target.playerInfo);
                         }
@@ -514,25 +550,34 @@ public class GameServer {
                     break;
 
                 case "HITME":
-                    // 피해자(현재 클라이언트)가 자신이 피격되었음을 신고. data = shooterName
+                    // 피해자(현재 클라이언트)가 자신이 피격되었음을 신고. data = shooterName 또는 TURRET:ownerName
                     String shooterName = data;
-                    ClientHandler shooter = clients.get(shooterName);
+                    boolean isTurretDamage = shooterName.startsWith("TURRET:");
+                    String actualShooter = isTurretDamage ? shooterName.substring(7) : shooterName;
+                    ClientHandler shooter = clients.get(actualShooter);
+                    
                     if (playerInfo != null) {
                         long now = System.currentTimeMillis();
                         // 스폰 보호 중이거나 이미 사망 상태면 무시
                         if (now < spawnProtectedUntil || playerInfo.hp <= 0)
                             break;
-                        int dmg = resolveBasicDamage(shooter != null ? shooter.playerInfo.characterId : null);
+                            
+                        // 터렛 데미지는 고정 20, 일반 공격은 캐릭터별 데미지
+                        int dmg = isTurretDamage ? 20 : resolveBasicDamage(shooter != null ? shooter.playerInfo.characterId : null);
                         playerInfo.hp -= dmg;
+                        
                         if (playerInfo.hp <= 0) {
                             playerInfo.hp = 0;
                             if (shooter != null && shooter.playerInfo != null) {
                                 shooter.playerInfo.kills++;
                                 playerInfo.deaths++;
-                                broadcastStats(shooterName, shooter.playerInfo);
+                                broadcastStats(actualShooter, shooter.playerInfo);
                                 broadcastStats(playerName, playerInfo);
                                 shooter.sendMessage("KILL:" + playerName);
-                                broadcast("CHAT:" + shooterName + " 님이 " + playerName + " 님을 처치했습니다!", null);
+                                String killMsg = isTurretDamage ? 
+                                    actualShooter + " 님의 터렛이 " + playerName + " 님을 처치했습니다!" :
+                                    actualShooter + " 님이 " + playerName + " 님을 처치했습니다!";
+                                broadcast("CHAT:" + killMsg, null);
                             } else {
                                 // 슈터를 모르면 일반 사망 처리만
                                 broadcastStats(playerName, playerInfo);
@@ -944,22 +989,26 @@ public class GameServer {
             if (!"tech_turret".equals(obj.type) || obj.hp <= 0)
                 continue;
             for (ClientHandler ch : clients.values()) {
+                // 터렛은 적 팀만 공격 (소유자 본인 제외 - 같은 팀이므로 이미 필터링됨)
                 if (ch.playerInfo == null || ch.playerInfo.hp <= 0 || ch.playerInfo.team == obj.team)
                     continue;
+                // 추가 안전 장치: 소유자 본인은 절대 공격하지 않음
+                if (ch.playerName.equals(obj.owner))
+                    continue;
+                    
                 double dist = Math.sqrt(Math.pow(obj.x - ch.playerInfo.x, 2) + Math.pow(obj.y - ch.playerInfo.y, 2));
                 if (dist <= TURRET_RANGE) {
                     // 터렛이 적을 감지하면 미사일 발사 메시지 브로드캐스트
-                    // Client expects: TURRET_SHOOT:objId,tx,ty,targetName
+                    // Client expects: TURRET_SHOOT:objId,tx,ty,targetName,ownerName
                     String shootMsg = "TURRET_SHOOT:" + obj.id + "," + (int) ch.playerInfo.x + ","
-                            + (int) ch.playerInfo.y + "," + ch.playerName;
+                            + (int) ch.playerInfo.y + "," + ch.playerName + "," + obj.owner;
                     for (ClientHandler c : clients.values()) {
                         c.sendMessage(shootMsg);
                     }
+                    System.out.println("[TURRET_SHOOT] Turret #" + obj.id + " (owner: " + obj.owner + 
+                        ", team: " + obj.team + ") attacking " + ch.playerName + " (team: " + ch.playerInfo.team + ")");
 
                     // 터렛 데미지 적용은 클라이언트의 미사일 충돌(HITME)로 위임
-                    // (즉시 데미지 제거)
-                    broadcastStats(ch.playerName, ch.playerInfo);
-
                     break; // 한 번에 한 명만 공격
                 }
             }
@@ -1017,9 +1066,17 @@ public class GameServer {
         // 게임 종료 체크
         if (redWins >= MAX_WINS || blueWins >= MAX_WINS) {
             broadcast("GAME_OVER:" + winTeamName, null);
-            // 게임 리셋은 별도 명령이나 재시작 필요
+            System.out.println("[GAME_OVER] " + winTeamName + " team wins the game! Resetting game state...");
+            
+            // 게임 종료 후 초기화 (10초 후)
+            new Timer().schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    resetGameState();
+                }
+            }, 10000);
         } else {
-            // 10초 후 다음 라운드
+            // 3초 후 다음 라운드
             broadcast("CHAT:3초 후 다음 라운드가 시작됩니다...", null);
             new Timer().schedule(new TimerTask() {
                 @Override
@@ -1030,6 +1087,41 @@ public class GameServer {
         }
     }
 
+    /**
+     * 게임 종료 후 모든 상태를 초기화하고 새 게임 시작
+     */
+    private void resetGameState() {
+        System.out.println("[RESET] Resetting game state...");
+        
+        // 게임 카운터 초기화
+        roundCount = 0;
+        redWins = 0;
+        blueWins = 0;
+        roundEnded = false;
+        
+        // 오브젝트 및 스킬 초기화
+        placedObjects.clear();
+        activeAuras.clear();
+        scheduledStrikes.clear();
+        playerCharacterChanged.clear();
+        
+        // 모든 플레이어 상태 초기화 (준비 해제, HP 리셋)
+        for (ClientHandler ch : clients.values()) {
+            ch.ready = false;
+            if (ch.playerInfo != null && ch.playerInfo.characterId != null) {
+                CharacterData cd = CharacterData.getById(ch.playerInfo.characterId);
+                if (cd != null) {
+                    ch.playerInfo.hp = (int) cd.health;
+                }
+                ch.playerInfo.kills = 0;
+                ch.playerInfo.deaths = 0;
+            }
+        }
+        
+        broadcast("CHAT:[시스템] 게임이 종료되었습니다. 로비로 돌아갑니다.", null);
+        System.out.println("[RESET] Game state reset complete. Waiting for new game start.");
+    }
+    
     private void startNextRound() {
         // 라운드가 끝난 후 호출되므로 카운트 증가
         // 단, 첫 게임 시작(roundCount==0)일 때는 1로 시작

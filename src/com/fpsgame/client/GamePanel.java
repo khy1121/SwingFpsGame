@@ -15,30 +15,53 @@ import javax.swing.*;
 /**
  * 게임 패널 - 기존 디자인 유지하면서 간단한 로직
  * 예제 코드처럼 단순한 게임 화면
+ * 
+ * 리팩토링: GameState, NetworkClient, GameRenderer 사용하여 책임 분리
+ * Phase 2: MapManager, SkillManager, UIManager, GameLogicController 추가
  */
 public class GamePanel extends JFrame implements KeyListener {
 
-    private final String playerName;
-    private final int team;
+    // 게임 상태 관리 객체 (리팩토링)
+    final GameState gameState;
+    
     private final Socket socket;
     private final DataOutputStream out;
     private final DataInputStream in;
+    
+    // 네트워크 통신 관리 (리팩토링)
+    private final NetworkClient networkClient;
+    
+    // 렌더링 관리 (리팩토링)
+    private final GameRenderer gameRenderer;
+    
+    // 메시지 처리 관리 (리팩토링)
+    private final GameMessageHandler messageHandler;
+    
+    // Phase 2: MVC 패턴 매니저들
+    private final MapManager mapManager;
+    private final SkillManager skillManager;
+    private final UIManager uiManager;
+    private final GameLogicController gameLogicController;
+    private final CollisionManager collisionManager;
+    private final PlayerMovementController movementController;
+    private final SpawnManager spawnManager;
+    final GameObjectManager objectManager; // package-private for GameMessageHandler
 
+    // Backward compatibility - keep fields but sync with gameState
+    final String playerName;
+    final int team;
+    
     private javax.swing.Timer timer;
-    private int playerX = 400;
-    private int playerY = 300;
+    int playerX = 400;
+    int playerY = 300;
     private final int SPEED = 5;
     private final boolean[] keys = new boolean[256];
 
-    // 선택된 캐릭터
-    private String selectedCharacter = "raven"; // 기본값
-    private CharacterData currentCharacterData;
-
-    // 스킬 시스템
-    private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
+    // 스킬 시스템 (매 프레임 update 필요하므로 로컬 유지)
+    Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
 
     // 스킬 이펙트 (네트워크 포함)
-    private static class ActiveEffect {
+    public static class ActiveEffect {
         String abilityId;
         String type; // BASIC, TACTICAL, ULTIMATE
         float duration; // 총 지속시간(초)
@@ -63,10 +86,10 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     // 다른 플레이어 이펙트, 내 이펙트
-    private final Map<String, java.util.List<ActiveEffect>> effectsByPlayer = new HashMap<>();
-    private final java.util.List<ActiveEffect> myEffects = new ArrayList<>();
+    final Map<String, java.util.List<ActiveEffect>> effectsByPlayer = new HashMap<>();
+    final java.util.List<ActiveEffect> myEffects = new ArrayList<>();
     // Structured skill effects
-    private final SkillEffectManager skillEffects = new SkillEffectManager();
+    final SkillEffectManager skillEffects = new SkillEffectManager();
 
     // Raven 전용 런타임 상태(첫 캐릭터 구현 시작점)
     private float ravenDashRemaining = 0f;
@@ -80,10 +103,16 @@ public class GamePanel extends JFrame implements KeyListener {
     private float teamThermalRemaining = 0f;
 
     // 다른 플레이어들
-    private Map<String, PlayerData> players = new HashMap<>();
+    final Map<String, PlayerData> players = new HashMap<>();
 
-    // 미사일 리스트
-    private final List<Missile> missiles = new ArrayList<>();
+    // 미사일 리스트 (objectManager에서 관리)
+    List<GameObjectManager.Missile> missiles;
+    
+    // 설치된 오브젝트 (objectManager에서 관리)
+    Map<Integer, GameObjectManager.PlacedObjectClient> placedObjects;
+    
+    // 스트라이크 마커 (objectManager에서 관리)
+    Map<Integer, GameObjectManager.StrikeMarker> strikeMarkers;
 
     // 게임 패널
     private GameCanvas canvas;
@@ -91,19 +120,11 @@ public class GamePanel extends JFrame implements KeyListener {
     // 마우스 위치 (조준선용)
     private int mouseX = 400;
     private int mouseY = 300;
+    private int rawMouseX = 400; // 원시 마우스 좌표 (패널 기준)
+    private int rawMouseY = 300;
 
     // 미니맵 표시 여부
-    private boolean showMinimap = true;
-
-    // 시야 범위 (화면 크기 기반 - 화면에 보이는 범위)
-    // 대각선 거리의 절반을 시야로 사용 (화면 중앙 기준)
-    private static final int VISION_RANGE = (int) (Math.sqrt(
-            GameConstants.GAME_WIDTH * GameConstants.GAME_WIDTH +
-                    GameConstants.GAME_HEIGHT * GameConstants.GAME_HEIGHT)
-            / 2);
-    // Piper 마킹 시 시야 배율 (기본보다 넓지만 전체는 아님)
-    private static final float PIPER_MARK_RANGE_FACTOR = 1.7f;
-    private static final int PIPER_THERMAL_DOT_SIZE = 10; // 열감지 시 점 크기 증가
+    boolean showMinimap = true;
 
     // 맵 시스템
     private java.awt.image.BufferedImage mapImage; // 맵 배경 이미지
@@ -111,11 +132,17 @@ public class GamePanel extends JFrame implements KeyListener {
     private int mapHeight = 2400; // 화면의 4배
     private int cameraX = 0; // 카메라 위치 (플레이어 중심)
     private int cameraY = 0;
-    private String currentMapName = "map"; // 기본 맵 (map.png 사용)
+    String currentMapName = "map"; // 기본 맵 (서버가 ROUND_START에서 변경 가능)
     // 타일 그리드
     private static final int TILE_SIZE = 32;
     private boolean[][] walkableGrid; // true = 이동 가능
     private int gridCols, gridRows;
+    
+    // UI 상수
+    private static final int MINIMAP_WIDTH = 200;
+    private static final int MINIMAP_HEIGHT = 150;
+    private static final int UI_MARGIN = 20;
+    public static final int CHAT_PANEL_WIDTH = 250;
     private Rectangle redSpawnZone, blueSpawnZone; // 팀 스폰 구역
     // 스폰 타일 원본 목록 (랜덤 스폰을 타일 단위로 정확히 하도록 유지)
     private final java.util.List<int[]> redSpawnTiles = new ArrayList<>();
@@ -124,10 +151,10 @@ public class GamePanel extends JFrame implements KeyListener {
     // 장애물 시스템
     private final java.util.List<Rectangle> obstacles = new ArrayList<>();
     // 디버그 토글
-    private boolean debugObstacles = false; // F3로 토글
+    boolean debugObstacles = false; // F3로 토글
 
     // 맵 편집 모드 (타일 walkable 페인팅)
-    private boolean editMode = false; // F4 토글
+    boolean editMode = false; // F4 토글
     private int hoverCol = -1, hoverRow = -1; // 마우스 오버 타일
     // 드래그 페인트 상태: -1=없음, 0=unwalkable로 칠하기, 1=walkable로 칠하기
     private int paintState = -1;
@@ -142,78 +169,33 @@ public class GamePanel extends JFrame implements KeyListener {
     private JTextField chatInput;
     private JScrollPane chatScroll;
 
-    // 킬/데스 카운터
-    private int kills = 0;
-    private int deaths = 0;
-    private int myHP = GameConstants.MAX_HP;
-    private int myMaxHP = GameConstants.MAX_HP;
+    // 방향 (GameState에 없는 애니메이션용 필드)
     private int myDirection = 0; // 0:Down, 1:Up, 2:Left, 3:Right
     private SpriteAnimation[] myAnimations;
-
-    // 설치된 오브젝트 (지뢰, 터렛)
-    private final Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
-
-    // 에어스트라이크 마커
-    private final Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
 
     // General 궁극기: 미니맵 타겟팅 대기 상태
     private boolean awaitingMinimapTarget = false;
 
     // 버프 상태 (gen_aura 등)
-    private float moveSpeedMultiplier = 1.0f;
-    private float attackSpeedMultiplier = 1.0f;
+    float moveSpeedMultiplier = 1.0f;
 
     // 라운드 시스템
-    private enum RoundState {
+    public enum RoundState {
         WAITING, PLAYING, ENDED
     }
 
-    private RoundState roundState = RoundState.WAITING;
-    private int roundCount = 0;
-    private int redWins = 0;
-    private int blueWins = 0;
-    private long roundStartTime = 0;
-    private static final int MAX_ROUNDS = 3; // 3판 2선승
-    private static final int ROUND_READY_TIME = 10000; // 10초 대기
-    private String centerMessage = "";
-    private long centerMessageEndTime = 0;
+    RoundState roundState = RoundState.WAITING;
+    int roundCount = 0;
+    int redWins = 0;
+    int blueWins = 0;
+    long roundStartTime = 0;
+    public static final int ROUND_READY_TIME = 10000; // 10초 대기
+    String centerMessage = "";
+    long centerMessageEndTime = 0;
 
     // 캐릭터 선택 제한 관련 변수
-    private boolean hasChangedCharacterInRound = false;
+    boolean hasChangedCharacterInRound = false;
     private static final long CHARACTER_CHANGE_TIME_LIMIT = 10000; // 10초
-
-    class PlacedObjectClient {
-        int id;
-        String type; // "tech_mine", "tech_turret"
-        int x, y;
-        int hp, maxHp;
-        String owner;
-        int team;
-
-        PlacedObjectClient(int id, String type, int x, int y, int hp, int maxHp, String owner, int team) {
-            this.id = id;
-            this.type = type;
-            this.x = x;
-            this.y = y;
-            this.hp = hp;
-            this.maxHp = maxHp;
-            this.owner = owner;
-            this.team = team;
-        }
-    }
-
-    class StrikeMarker {
-        int id;
-        int x, y;
-        long createdAt;
-
-        StrikeMarker(int id, int x, int y) {
-            this.id = id;
-            this.x = x;
-            this.y = y;
-            this.createdAt = System.currentTimeMillis();
-        }
-    }
 
     class PlayerData {
         int x, y;
@@ -248,25 +230,13 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    class Missile {
-        int x, y;
-        int dx, dy;
-        int team;
-        String owner; // 발사자 이름(킬 크레딧/피격 리포트용)
-
-        Missile(int x, int y, int dx, int dy, int team, String owner) {
-            this.x = x;
-            this.y = y;
-            this.dx = dx;
-            this.dy = dy;
-            this.team = team;
-            this.owner = owner;
-        }
-    }
+    // GamePanel 생성자 부분 - 밑에 위치
 
     class GameCanvas extends JPanel {
         public GameCanvas() {
-            setPreferredSize(new Dimension(GameConstants.GAME_WIDTH, GameConstants.GAME_HEIGHT));
+            // 초기 크기: 1150x800 (채팅 패널 250px 제외)
+            // 스케일링으로 1280x720 영역만 보임
+            setPreferredSize(new Dimension(1150, 800));
             setBackground(new Color(20, 25, 35));
             setFocusable(true);
             addKeyListener(GamePanel.this);
@@ -278,21 +248,28 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    // 원시 좌표 저장
+                    rawMouseX = e.getX();
+                    rawMouseY = e.getY();
+                    
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    java.awt.Point scaled = scaleMouseCoordinates(rawMouseX, rawMouseY);
+                    int scaledMouseX = scaled.x;
+                    int scaledMouseY = scaled.y;
+                    
                     // 미니맵 타겟팅 모드: General 에어스트라이크
                     if (awaitingMinimapTarget && e.getButton() == MouseEvent.BUTTON1) {
-                        // 미니맵 영역 체크
-                        int minimapWidth = 200;
-                        int minimapHeight = 150;
-                        int minimapX = getWidth() - minimapWidth - 20;
-                        int minimapY = 20;
+                        // 미니맵 영역 체크 (고정 해상도 기준)
+                        int minimapX = GameConstants.GAME_WIDTH - MINIMAP_WIDTH - UI_MARGIN;
+                        int minimapY = UI_MARGIN;
 
-                        if (e.getX() >= minimapX && e.getX() <= minimapX + minimapWidth &&
-                                e.getY() >= minimapY && e.getY() <= minimapY + minimapHeight) {
+                        if (scaledMouseX >= minimapX && scaledMouseX <= minimapX + MINIMAP_WIDTH &&
+                                scaledMouseY >= minimapY && scaledMouseY <= minimapY + MINIMAP_HEIGHT) {
                             // 미니맵 좌표를 맵 좌표로 변환
-                            float scaleX = (float) minimapWidth / mapWidth;
-                            float scaleY = (float) minimapHeight / mapHeight;
-                            int targetMapX = (int) ((e.getX() - minimapX) / scaleX);
-                            int targetMapY = (int) ((e.getY() - minimapY) / scaleY);
+                            float mapScaleX = (float) MINIMAP_WIDTH / mapWidth;
+                            float mapScaleY = (float) MINIMAP_HEIGHT / mapHeight;
+                            int targetMapX = (int) ((scaledMouseX - minimapX) / mapScaleX);
+                            int targetMapY = (int) ((scaledMouseY - minimapY) / mapScaleY);
 
                             // 에어스트라이크 전송
                             sendSkillUse(2, "ULTIMATE", targetMapX, targetMapY);
@@ -309,15 +286,15 @@ public class GamePanel extends JFrame implements KeyListener {
 
                     // 편집 모드: 타일 페인팅
                     if (editMode) {
-                        int mapX = e.getX() + cameraX;
-                        int mapY = e.getY() + cameraY;
+                        int mapX = scaledMouseX + cameraX;
+                        int mapY = scaledMouseY + cameraY;
                         startPaintAt(mapX, mapY);
                         return;
                     }
                     // 게임 모드: 좌클릭 공격
                     if (e.getButton() == MouseEvent.BUTTON1) {
-                        int targetMapX = e.getX() + cameraX;
-                        int targetMapY = e.getY() + cameraY;
+                        int targetMapX = scaledMouseX + cameraX;
+                        int targetMapY = scaledMouseY + cameraY;
                         useBasicAttack(targetMapX, targetMapY);
                     }
                 }
@@ -334,16 +311,25 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseMotionListener(new MouseMotionAdapter() {
                 @Override
                 public void mouseMoved(MouseEvent e) {
-                    mouseX = e.getX();
-                    mouseY = e.getY();
+                    // 원시 좌표 저장
+                    rawMouseX = e.getX();
+                    rawMouseY = e.getY();
+                    
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    java.awt.Point scaled = scaleMouseCoordinates(rawMouseX, rawMouseY);
+                    mouseX = scaled.x;
+                    mouseY = scaled.y;
+                    
                     if (editMode)
                         updateHoverTile(mouseX + cameraX, mouseY + cameraY);
                 }
 
                 @Override
                 public void mouseDragged(MouseEvent e) {
-                    mouseX = e.getX();
-                    mouseY = e.getY();
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    mouseX = scaled.x;
+                    mouseY = scaled.y;
                     if (editMode) {
                         int mapX = mouseX + cameraX;
                         int mapY = mouseY + cameraY;
@@ -357,811 +343,164 @@ public class GamePanel extends JFrame implements KeyListener {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            Graphics2D g2d = (Graphics2D) g;
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-            // 1. 맵 배경 그리기 (카메라 오프셋 적용)
-            if (mapImage != null) {
-                g2d.drawImage(mapImage, -cameraX, -cameraY, mapWidth, mapHeight, null);
-            } else {
-                // 폴백: 그리드
-                drawGrid(g2d);
-            }
-
-            // 2. 장애물 디버그 표시 (개발용 - 위치 확인)
-            drawObstacles(g2d);
-
-            // 2.1 에어스트라이크 마커 (바닥 표시)
-            drawStrikeMarkersMain(g2d);
-
-            // 2.5. 편집 모드 타일 오버레이 (UI 렌더링 이전에 호출)
-            if (editMode) {
-                drawEditorOverlay(g2d);
-            }
-
-            // ...existing code...
-
-            // ...existing code...
-
-            // 3. 다른 플레이어들 그리기 (화면 좌표로 변환)
-            for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
-                PlayerData p = entry.getValue();
-
-                // 맵 좌표를 화면 좌표로 변환
-                int screenX = p.x - cameraX;
-                int screenY = p.y - cameraY;
-
-                // 화면 내에 있는 경우에만 그리기 (최적화)
-                if (isOnScreen(screenX, screenY)) {
-                    Color playerColor = p.team == GameConstants.TEAM_RED ? new Color(244, 67, 54)
-                            : new Color(33, 150, 243);
-
-                    // 스프라이트 그리기 (원격 플레이어)
-                    if (p.animations != null) {
-                        int animIndex = p.direction;
-                        if (animIndex < p.animations.length && p.animations[animIndex] != null) {
-                            // 애니메이션 그리는 코드
-                            p.animations[animIndex].draw(g2d, screenX - 20, screenY - 20, 40, 40);
-                        } else {
-                            // Fallback
-                            g2d.setColor(playerColor);
-                            g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
-                        }
-                    } else {
-                        // 기본 원 그리기
-                        g2d.setColor(playerColor);
-                        g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
-                    }
-
-                    // HP 바
-                    drawHealthBar(g2d, screenX, screenY + 25, p.hp, p.maxHp);
-                }
-            }
-
-            // 4. 로컬 플레이어 그리기 (화면 좌표)
-            int myScreenX = playerX - cameraX;
-            int myScreenY = playerY - cameraY;
-
-            Color myColor = team == GameConstants.TEAM_RED ? new Color(255, 100, 100) : new Color(100, 150, 255);
-            // 내 스프라이트 그리기
-            if (myAnimations != null) {
-                int animIndex = myDirection;
-                if (animIndex < myAnimations.length && myAnimations[animIndex] != null) {
-                    // 애니메이션 그리는 코드
-                    myAnimations[animIndex].draw(g2d, myScreenX - 20, myScreenY - 20, 40, 40);
-                } else {
-                    g2d.setColor(myColor);
-                    g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
-                }
-            } else {
-                g2d.setColor(myColor);
-                g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
-            }
-
-            // 내 이펙트 (구버전)
-            drawMyEffects(g2d);
-            // 구조화된 SkillEffect (클래스 기반) 렌더링
-            skillEffects.drawSelf(g2d, myScreenX, myScreenY);
-
-            // 내 이름
-            g2d.setColor(Color.YELLOW);
-            g2d.setFont(new Font("Arial", Font.BOLD, 12));
-            FontMetrics fm = g2d.getFontMetrics();
-            int nameWidth = fm.stringWidth(playerName + " (You)");
-            g2d.drawString(playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
-
-            // 내 HP 바 (플레이어 아래)
-            drawHealthBar(g2d, myScreenX, myScreenY + 25, myHP, myMaxHP);
-
-            // 조준선 그리기 (화면 좌표 기준)
-            drawAimLine(g2d);
-
-            // 5. 미사일 그리기 (화면 좌표로 변환)
-            g2d.setColor(Color.YELLOW);
-            for (Missile m : missiles) {
-                int mScreenX = m.x - cameraX;
-                int mScreenY = m.y - cameraY;
-                if (isOnScreen(mScreenX, mScreenY)) {
-                    g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
-                }
-            }
-
-            // 6. 설치된 오브젝트 그리기 (지뢰/터렛)
-            for (Map.Entry<Integer, PlacedObjectClient> entry : placedObjects.entrySet()) {
-                PlacedObjectClient obj = entry.getValue();
-                int objScreenX = obj.x - cameraX;
-                int objScreenY = obj.y - cameraY;
-
-                if (isOnScreen(objScreenX, objScreenY)) {
-                    // 타입별 색상 및 크기
-                    Color objColor;
-                    int size;
-                    String label;
-
-                    if ("tech_mine".equals(obj.type)) {
-                        objColor = obj.team == GameConstants.TEAM_RED ? new Color(200, 50, 50)
-                                : new Color(50, 100, 200);
-                        size = 16;
-                        label = "지뢰";
-                    } else if ("tech_turret".equals(obj.type)) {
-                        objColor = obj.team == GameConstants.TEAM_RED ? new Color(220, 80, 80)
-                                : new Color(80, 120, 220);
-                        size = 24;
-                        label = "터렛";
-                    } else {
-                        objColor = Color.GRAY;
-                        size = 20;
-                        label = "?";
-                    }
-
-                    // 오브젝트 본체 그리기 (사각형)
-                    g2d.setColor(objColor);
-                    g2d.fillRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-
-                    // 테두리
-                    g2d.setColor(obj.team == team ? Color.GREEN : Color.RED);
-                    g2d.setStroke(new BasicStroke(2f));
-                    g2d.drawRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-
-                    // HP 바 (오브젝트 위)
-                    int barWidth = 30;
-                    int barHeight = 4;
-                    int barY = objScreenY - size / 2 - 8;
-
-                    g2d.setColor(Color.DARK_GRAY);
-                    g2d.fillRect(objScreenX - barWidth / 2, barY, barWidth, barHeight);
-
-                    float hpPercent = (float) obj.hp / obj.maxHp;
-                    Color hpColor;
-                    if (hpPercent > 0.6f)
-                        hpColor = Color.GREEN;
-                    else if (hpPercent > 0.3f)
-                        hpColor = Color.YELLOW;
-                    else
-                        hpColor = Color.RED;
-
-                    g2d.setColor(hpColor);
-                    int currentBarWidth = (int) (barWidth * hpPercent);
-                    g2d.fillRect(objScreenX - barWidth / 2, barY, currentBarWidth, barHeight);
-
-                    // 타입 라벨 (오브젝트 아래)
-                    g2d.setFont(new Font("맑은 고딕", Font.BOLD, 10));
-                    g2d.setColor(Color.WHITE);
-                    FontMetrics objFm = g2d.getFontMetrics();
-                    int labelWidth = objFm.stringWidth(label);
-                    g2d.drawString(label, objScreenX - labelWidth / 2, objScreenY + size / 2 + 12);
-
-                    // HP 수치 표시
-                    String hpText = obj.hp + "/" + obj.maxHp;
-                    g2d.setFont(new Font("Arial", Font.PLAIN, 9));
-                    objFm = g2d.getFontMetrics();
-                    int hpWidth = objFm.stringWidth(hpText);
-                    g2d.setColor(new Color(255, 255, 255, 200));
-                    g2d.drawString(hpText, objScreenX - hpWidth / 2, barY - 2);
-                }
-            }
-
-            // ...existing code...
-
-            // === UI 요소는 항상 맨 마지막에 그리기 ===
-            // 미니맵 그리기 (우측 상단)
-            if (showMinimap) {
-                drawMinimap(g2d);
-            }
-
-            // HUD
-            drawHUD(g2d);
-
-            // 라운드 정보 및 중앙 메시지
-            drawRoundInfo(g2d);
-        }
-
-        private void drawRoundInfo(Graphics2D g) {
-            // 상단 점수판
-            int centerX = getWidth() / 2;
-            g.setColor(new Color(0, 0, 0, 150));
-            g.fillRect(centerX - 100, 0, 200, 40);
-
-            g.setFont(new Font("Arial", Font.BOLD, 24));
-            g.setColor(new Color(255, 100, 100));
-            g.drawString(String.valueOf(redWins), centerX - 60, 30);
-
-            g.setColor(Color.WHITE);
-            g.drawString(":", centerX, 28);
-
-            g.setColor(new Color(100, 150, 255));
-            g.drawString(String.valueOf(blueWins), centerX + 40, 30);
-
-            g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
-            g.setColor(Color.WHITE);
-            g.drawString("Round " + roundCount, centerX - 30, 55);
-
-            // 중앙 메시지 (카운트다운, 승패 등)
-            if (roundState == RoundState.WAITING) {
-                long remaining = Math.max(0, ROUND_READY_TIME - (System.currentTimeMillis() - roundStartTime));
-                int sec = (int) (remaining / 1000) + 1;
-                if (remaining > 0) {
-                    drawCenterText(g, "라운드 시작까지 " + sec + "초", 40, Color.YELLOW);
-                    drawCenterText(g, "캐릭터를 변경할 수 있습니다 (B키)", 20, Color.WHITE, 50);
-                }
-            } else if (!centerMessage.isEmpty() && System.currentTimeMillis() < centerMessageEndTime) {
-                drawCenterText(g, centerMessage, 40, Color.YELLOW);
-            }
-        }
-
-        private void drawCenterText(Graphics2D g, String text, int size, Color color) {
-            drawCenterText(g, text, size, color, 0);
-        }
-
-        private void drawCenterText(Graphics2D g, String text, int size, Color color, int yOffset) {
-            g.setFont(new Font("맑은 고딕", Font.BOLD, size));
-            FontMetrics fm = g.getFontMetrics();
-            int x = (getWidth() - fm.stringWidth(text)) / 2;
-            int y = (getHeight() / 2) + yOffset;
-
-            // 그림자
-            g.setColor(Color.BLACK);
-            g.drawString(text, x + 2, y + 2);
-
-            g.setColor(color);
-            g.drawString(text, x, y);
+            // RenderContext를 생성하여 GameRenderer에 전달
+            GameRenderer.RenderContext ctx = GamePanel.this.createRenderContext();
+            gameRenderer.render(g, ctx);
         }
     }
 
     /**
-     * 화면 내에 있는지 체크 (최적화용)
+     * GameRenderer에 전달할 RenderContext 생성
      */
-    private boolean isOnScreen(int screenX, int screenY) {
-        return screenX >= -50 && screenX <= GameConstants.GAME_WIDTH + 50 &&
-                screenY >= -50 && screenY <= GameConstants.GAME_HEIGHT + 50;
-    }
-
-    /**
-     * 조준선 그리기: 캐릭터 중심에서 마우스 방향으로 (화면 좌표 기준)
-     */
-    private void drawAimLine(Graphics2D g2d) {
-        int myScreenX = playerX - cameraX;
-        int myScreenY = playerY - cameraY;
-
-        int vx = mouseX - myScreenX;
-        int vy = mouseY - myScreenY;
-        if (vx == 0 && vy == 0)
-            return; // 마우스가 캐릭터 위치와 같으면 표시 안함
-
-        double len = Math.sqrt(vx * vx + vy * vy);
-        double nx = vx / len;
-        double ny = vy / len;
-
-        // 조준선 길이 (짧게 조정)
-        int lineLength = 50;
-        int endX = myScreenX + (int) (nx * lineLength);
-        int endY = myScreenY + (int) (ny * lineLength);
-
-        // 반투명 빨간색 선
-        g2d.setColor(new Color(255, 0, 0, 100));
-        Stroke oldStroke = g2d.getStroke();
-        g2d.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
-                1f, new float[] { 10f, 5f }, 0f)); // 점선
-        g2d.drawLine(myScreenX, myScreenY, endX, endY);
-        g2d.setStroke(oldStroke);
-
-        // 마우스 위치에 작은 크로스헤어
-        g2d.setColor(new Color(255, 255, 0, 150));
-        g2d.drawOval(mouseX - 4, mouseY - 4, 8, 8);
-        g2d.drawLine(mouseX - 6, mouseY, mouseX + 6, mouseY);
-        g2d.drawLine(mouseX, mouseY - 6, mouseX, mouseY + 6);
-    }
-
-    private void drawMyEffects(Graphics2D g2d) {
-        if (myEffects.isEmpty())
-            return;
-        int myScreenX = playerX - cameraX;
-        int myScreenY = playerY - cameraY;
-
-        for (ActiveEffect ef : myEffects) {
-            float progress = 1f - (ef.remaining / ef.duration);
-            int radius = 28 + (int) (Math.sin(progress * 6.28318) * 4);
-            int alpha = (int) (160 * (ef.remaining / ef.duration));
-            alpha = Math.max(40, Math.min(200, alpha));
-            g2d.setColor(new Color(ef.color.getRed(), ef.color.getGreen(), ef.color.getBlue(), alpha));
-            Stroke old = g2d.getStroke();
-            g2d.setStroke(new BasicStroke(3f));
-            g2d.drawOval(myScreenX - radius, myScreenY - radius, radius * 2, radius * 2);
-            g2d.setStroke(old);
-
-            // Piper 전용 화려한 효과 강화
-            if ("piper_mark".equalsIgnoreCase(ef.abilityId)) {
-                // 부드러운 시안 파동 링 두 겹
-                g2d.setColor(new Color(100, 220, 255, 90));
-                g2d.drawOval(myScreenX - radius - 6, myScreenY - radius - 6, (radius + 6) * 2, (radius + 6) * 2);
-                g2d.setColor(new Color(80, 200, 255, 60));
-                g2d.drawOval(myScreenX - radius - 12, myScreenY - radius - 12, (radius + 12) * 2,
-                        (radius + 12) * 2);
-            } else if ("piper_thermal".equalsIgnoreCase(ef.abilityId)) {
-                // 주황색 글로우와 회전 아크
-                double t = (ef.duration - ef.remaining);
-                int glowR = radius + 8;
-                g2d.setColor(new Color(255, 160, 40, 110));
-                g2d.setStroke(new BasicStroke(4f));
-                g2d.drawOval(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2);
-                // 회전 아크
-                g2d.setColor(new Color(255, 200, 80, 160));
-                int arcStart = (int) ((t * 180) % 360);
-                ((Graphics2D) g2d).setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2d.drawArc(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2, arcStart, 60);
-            }
-        }
-    }
-
-    private void drawGrid(Graphics2D g) {
-        g.setColor(new Color(30, 35, 45));
-        for (int x = 0; x < getWidth(); x += 50) {
-            g.drawLine(x, 0, x, getHeight());
-        }
-        for (int y = 0; y < getHeight(); y += 50) {
-            g.drawLine(0, y, getWidth(), y);
-        }
-    }
-
-    /**
-     * 장애물 디버그 표시 (개발용)
-     */
-    private void drawObstacles(Graphics2D g2d) {
-        if (!debugObstacles)
-            return;
-        g2d.setColor(new Color(255, 0, 0, 100)); // 반투명 빨간색
-        for (Rectangle obs : obstacles) {
-            // 맵 좌표를 화면 좌표로 변환
-            int screenX = obs.x - cameraX;
-            int screenY = obs.y - cameraY;
-            g2d.fillRect(screenX, screenY, obs.width, obs.height);
-            g2d.setColor(new Color(255, 255, 0, 150));
-            g2d.drawRect(screenX, screenY, obs.width, obs.height);
-            g2d.setColor(new Color(255, 0, 0, 100));
-        }
-    }
-
-    /**
-     * 에어스트라이크 마커 메인 화면 표시
-     */
-    private void drawStrikeMarkersMain(Graphics2D g2d) {
-        if (strikeMarkers.isEmpty())
-            return;
-
-        for (StrikeMarker marker : strikeMarkers.values()) {
-            int screenX = marker.x - cameraX;
-            int screenY = marker.y - cameraY;
-
-            if (isOnScreen(screenX, screenY)) {
-                // 반투명 빨간 원 (경고 영역)
-                int radius = 120; // 서버 설정과 동일
-
-                // 펄싱 효과
-                long currentTime = System.currentTimeMillis();
-                float pulsePhase = (currentTime % 500) / 500f; // 0.5초 주기
-                int alpha = (int) (100 + 50 * Math.sin(pulsePhase * Math.PI * 2));
-
-                g2d.setColor(new Color(255, 0, 0, alpha));
-                g2d.fillOval(screenX - radius, screenY - radius, radius * 2, radius * 2);
-
-                // 테두리
-                g2d.setColor(new Color(255, 0, 0, 200));
-                g2d.setStroke(new BasicStroke(2f));
-                g2d.drawOval(screenX - radius, screenY - radius, radius * 2, radius * 2);
-
-                // 중앙 십자가
-                g2d.setColor(Color.YELLOW);
-                g2d.drawLine(screenX - 20, screenY, screenX + 20, screenY);
-                g2d.drawLine(screenX, screenY - 20, screenX, screenY + 20);
-
-                // 경고 텍스트
-                g2d.setColor(Color.WHITE);
-                g2d.setFont(new Font("Arial", Font.BOLD, 14));
-                String warning = "WARNING!";
-                FontMetrics fm = g2d.getFontMetrics();
-                g2d.drawString(warning, screenX - fm.stringWidth(warning) / 2, screenY - 10);
-            }
-        }
-    }
-
-    private void drawHealthBar(Graphics2D g, int x, int y, int hp, int maxHp) {
-        int barWidth = 40;
-        int barHeight = 5;
-
-        g.setColor(Color.DARK_GRAY);
-        g.fillRect(x - barWidth / 2, y, barWidth, barHeight);
-
-        g.setColor(Color.GREEN);
-        float ratio = (float) hp / Math.max(1, maxHp);
-        int currentWidth = (int) (barWidth * ratio);
-        g.fillRect(x - barWidth / 2, y, currentWidth, barHeight);
-    }
-
-    private void drawMinimap(Graphics2D g2d) {
-        // 미니맵 크기 및 위치 설정
-        int minimapWidth = 200;
-        int minimapHeight = 150;
-        // 캔버스 너비 기준으로 배치 (채팅 패널은 캔버스 밖에 있음)
-        int minimapX = canvas.getWidth() - minimapWidth - 20;
-        int minimapY = 20;
-
-        // 실제 맵 크기 사용
-        float scaleX = (float) minimapWidth / GamePanel.this.mapWidth;
-        float scaleY = (float) minimapHeight / GamePanel.this.mapHeight;
-
-        // 배경 또는 맵 이미지 그리기
-        if (mapImage != null) {
-            // 맵 이미지를 축소하여 배경으로 렌더링
-            g2d.drawImage(mapImage, minimapX, minimapY, minimapWidth, minimapHeight, null);
-        } else {
-            // 폴백: 어두운 배경 + 장애물 간단 렌더링
-            g2d.setColor(new Color(20, 20, 30, 200));
-            g2d.fillRect(minimapX, minimapY, minimapWidth, minimapHeight);
-            if (obstacles != null && !obstacles.isEmpty()) {
-                g2d.setColor(new Color(200, 60, 60, 180));
-                for (Rectangle obs : obstacles) {
-                    int ox = minimapX + Math.round(obs.x * scaleX);
-                    int oy = minimapY + Math.round(obs.y * scaleY);
-                    int ow = Math.max(1, Math.round(obs.width * scaleX));
-                    int oh = Math.max(1, Math.round(obs.height * scaleY));
-                    g2d.fillRect(ox, oy, ow, oh);
-                }
-            }
-        }
-
-        // 테두리
-        g2d.setColor(Color.WHITE);
-        g2d.drawRect(minimapX, minimapY, minimapWidth, minimapHeight);
-
-        // 현재 화면(카메라) 뷰포트 표시
-        int viewX = minimapX + Math.round(cameraX * scaleX);
-        int viewY = minimapY + Math.round(cameraY * scaleY);
-        int viewW = Math.max(1, Math.round(GameConstants.GAME_WIDTH * scaleX));
-        int viewH = Math.max(1, Math.round(GameConstants.GAME_HEIGHT * scaleY));
-        g2d.setColor(new Color(255, 255, 255, 120));
-        g2d.drawRect(viewX, viewY, viewW, viewH);
-
-        // 내 위치를 미니맵에 표시
-        int myMinimapX = minimapX + (int) (playerX * scaleX);
-        int myMinimapY = minimapY + (int) (playerY * scaleY);
-
-        // 내 캐릭터 (노란색, 조금 큰 점)
-        g2d.setColor(Color.YELLOW);
-        g2d.fillOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
-        g2d.setColor(Color.ORANGE);
-        g2d.drawOval(myMinimapX - 5, myMinimapY - 5, 10, 10);
-
-        // 시야 범위 원 표시 (반투명)
-        int visionRadius = (int) (VISION_RANGE * ((scaleX + scaleY) * 0.5f));
-        g2d.setColor(new Color(255, 255, 255, 30));
-        g2d.fillOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
-        g2d.setColor(new Color(255, 255, 255, 80));
-        g2d.drawOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
-
-        // 다른 플레이어들 표시
-        boolean thermalActive = (piperThermalRemaining > 0f || teamThermalRemaining > 0f);
-        boolean markActive = !thermalActive && (piperMarkRemaining > 0f || teamMarkRemaining > 0f);
-        int extendedRadius = (int) (VISION_RANGE * (markActive ? PIPER_MARK_RANGE_FACTOR : 1f));
-        synchronized (players) {
-            for (PlayerData pd : players.values()) {
-                int dx = pd.x - playerX;
-                int dy = pd.y - playerY;
-                double distance = Math.sqrt(dx * dx + dy * dy);
-
-                // 뷰포트 체크: 적이 현재 화면에 보이는지 확인
-                boolean inViewport = (pd.x >= cameraX && pd.x <= cameraX + canvas.getWidth() &&
-                        pd.y >= cameraY && pd.y <= cameraY + canvas.getHeight());
-
-                // Piper 스킬(열감지/마크)은 뷰포트 무시, 일반 시야만 뷰포트 체크
-                boolean shouldShow = false;
-                if (thermalActive) {
-                    // 열감지: 전체 맵에서 모든 적 표시 (뷰포트 무시)
-                    shouldShow = true;
-                } else if (markActive && distance <= extendedRadius) {
-                    // 마크: 확장된 범위 내 적 표시 (뷰포트 무시)
-                    shouldShow = true;
-                } else if (!markActive && !thermalActive && distance <= VISION_RANGE && inViewport) {
-                    // 일반 시야: 범위 내 + 화면에 보이는 적만
-                    shouldShow = true;
-                }
-
-                if (shouldShow) {
-                    int otherX = minimapX + (int) (pd.x * scaleX);
-                    int otherY = minimapY + (int) (pd.y * scaleY);
-                    if (thermalActive) {
-                        g2d.setColor(new Color(255, 180, 0));
-                        g2d.fillOval(otherX - PIPER_THERMAL_DOT_SIZE / 2, otherY - PIPER_THERMAL_DOT_SIZE / 2,
-                                PIPER_THERMAL_DOT_SIZE, PIPER_THERMAL_DOT_SIZE);
-                    } else {
-                        if (pd.team == GameConstants.TEAM_BLUE) {
-                            g2d.setColor(Color.BLUE);
-                        } else if (pd.team == GameConstants.TEAM_RED) {
-                            g2d.setColor(Color.RED);
-                        } else {
-                            g2d.setColor(Color.GRAY);
-                        }
-                        g2d.fillOval(otherX - 3, otherY - 3, 6, 6);
-                    }
-                }
-            }
-        }
-
-        // 에어스트라이크 마커 표시 (빨간 십자가)
-        for (Map.Entry<Integer, StrikeMarker> entry : strikeMarkers.entrySet()) {
-            StrikeMarker marker = entry.getValue();
-            int markerX = minimapX + (int) (marker.x * scaleX);
-            int markerY = minimapY + (int) (marker.y * scaleY);
-
-            // 빨간 펄싱 원 (경고 효과)
-            long currentTime = System.currentTimeMillis();
-            float pulsePhase = (currentTime % 1000) / 1000f; // 0~1 반복
-            int pulseAlpha = (int) (150 + 105 * Math.sin(pulsePhase * Math.PI * 2));
-            g2d.setColor(new Color(255, 0, 0, pulseAlpha));
-            g2d.fillOval(markerX - 8, markerY - 8, 16, 16);
-
-            // 빨간 십자가
-            g2d.setColor(new Color(255, 255, 0, 255));
-            g2d.setStroke(new BasicStroke(2f));
-            g2d.drawLine(markerX - 10, markerY, markerX + 10, markerY);
-            g2d.drawLine(markerX, markerY - 10, markerX, markerY + 10);
-
-            // 경고 텍스트
-            g2d.setFont(new Font("Arial", Font.BOLD, 9));
-            g2d.setColor(new Color(255, 255, 255, 255));
-            g2d.drawString("!", markerX - 3, markerY + 4);
-        }
-
-        // 미니맵 레이블
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 10));
-        g2d.drawString("MAP", minimapX + 5, minimapY + 12);
-    }
-
-    private void drawHUD(Graphics2D g) {
-        // ===== currentCharacterData null 체크 및 안전장치 =====
-        if (currentCharacterData == null) {
-            currentCharacterData = CharacterData.getById(selectedCharacter);
-            if (currentCharacterData == null) {
-                currentCharacterData = CharacterData.getById("raven"); // 폴백
-            }
-        }
+    private GameRenderer.RenderContext createRenderContext() {
+        GameRenderer.RenderContext ctx = new GameRenderer.RenderContext();
         
-        // 배경
-        g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(10, 10, 250, 160);
-
-        // 폰트 설정
-        g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
-        g.setColor(Color.WHITE);
-
-        int yPos = 30;
-        g.drawString("플레이어: " + playerName, 20, yPos);
-        yPos += 20;
-        g.drawString("팀: " + (team == GameConstants.TEAM_RED ? "RED" : "BLUE"), 20, yPos);
-        yPos += 20;
+        // 맵 정보
+        ctx.mapImage = this.mapImage;
+        ctx.mapWidth = this.mapWidth;
+        ctx.mapHeight = this.mapHeight;
+        ctx.cameraX = this.cameraX;
+        ctx.cameraY = this.cameraY;
+        ctx.obstacles = this.obstacles;
+        ctx.debugObstacles = this.debugObstacles;
         
-        // ===== 캐릭터 이름 항상 currentCharacterData에서 가져오기 =====
-        g.drawString("캐릭터: " + currentCharacterData.name, 20, yPos);
-        yPos += 20;
-
-        // ===== HP 바: 항상 최신 myHP/myMaxHP 사용 =====
-        g.drawString("HP: " + myHP + "/" + myMaxHP, 20, yPos);
-        drawHealthBar(g, 130, yPos - 12, myHP, myMaxHP);
-        yPos += 20;
-
-        // 킬/데스
-        g.setColor(new Color(255, 215, 0)); // 골드
-        g.drawString("Kills: " + kills + " / Deaths: " + deaths, 20, yPos);
-        yPos += 20;
-
-        // ===== 캐릭터 스탯 표시: currentCharacterData 기준 =====
-        g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
-        g.setColor(new Color(255, 200, 200));
-        g.drawString("최대HP: " + (int) currentCharacterData.health, 20, yPos);
-        yPos += 18;
-        g.setColor(new Color(200, 255, 200));
-        g.drawString("속도: " + String.format("%.1f", currentCharacterData.speed), 20, yPos);
-
-        // 스킬 HUD (화면 하단 중앙)
-        drawSkillHUD(g);
-
-        // 도움말
-        g.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
-        g.setColor(Color.YELLOW);
-        g.drawString("좌클릭: 기본공격 | E: 전술스킬 | R: 궁극기", 20, getHeight() - 40);
-        g.drawString("B키: 캐릭터 선택", 20, getHeight() - 20);
-    }
-
-    /**
-     * 스킬 UI 그리기 (화면 하단 중앙)
-     */
-    private void drawSkillHUD(Graphics2D g) {
-        if (abilities == null)
-            return;
-
-        int hudWidth = 400;
-        int hudHeight = 80;
-        int hudX = (getWidth() - hudWidth) / 2;
-        int hudY = getHeight() - hudHeight - 70;
-
-        // 배경
-        g.setColor(new Color(0, 0, 0, 180));
-        g.fillRoundRect(hudX, hudY, hudWidth, hudHeight, 10, 10);
-
-        // 각 스킬 박스 그리기
-        int skillWidth = 60;
-        int skillHeight = 60;
-        int skillGap = 20;
-        int startX = hudX + (hudWidth - (skillWidth * 3 + skillGap * 2)) / 2;
-        int skillY = hudY + 10;
-
-        String[] keyLabels = { "좌클릭", "E", "R" };
-        Color[] skillColors = {
-                new Color(100, 200, 100), // 기본공격 - 초록
-                new Color(100, 150, 255), // 전술스킬 - 파랑
-                new Color(255, 100, 100) // 궁극기 - 빨강
-        };
-
-        for (int i = 0; i < 3 && i < abilities.length; i++) {
-            Ability ability = abilities[i];
-            int skillX = startX + i * (skillWidth + skillGap);
-
-            // 스킬 박스 배경
-            if (ability.canUse()) {
-                g.setColor(skillColors[i]);
-            } else {
-                g.setColor(new Color(40, 40, 40));
-            }
-            g.fillRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
-
-            // 테두리 (Piper 활성화 시 컬러)
-            boolean piper = "piper".equalsIgnoreCase(selectedCharacter);
-            float remain = 0f;
-            Color activeBorder = Color.WHITE;
-            if (piper) {
-                if (i == 1)
-                    remain = Math.max(piperMarkRemaining, 0f);
-                else if (i == 2)
-                    remain = Math.max(piperThermalRemaining, 0f);
-                if (remain > 0f) {
-                    activeBorder = (i == 1) ? new Color(80, 200, 255) : new Color(255, 160, 40);
-                }
-            }
-            g.setColor(activeBorder);
-            g.setStroke(new BasicStroke((piper && remain > 0f) ? 3f : 2f));
-            g.drawRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
-
-            // 쿨타임 오버레이 (어둡게)
-            if (!ability.canUse()) {
-                float cooldownPercent = ability.getCooldownPercent();
-                int overlayHeight = (int) (skillHeight * cooldownPercent);
-                g.setColor(new Color(0, 0, 0, 160));
-                g.fillRoundRect(skillX, skillY + (skillHeight - overlayHeight),
-                        skillWidth, overlayHeight, 8, 8);
-
-                // 쿨타임 텍스트
-                g.setColor(Color.WHITE);
-                g.setFont(new Font("맑은 고딕", Font.BOLD, 16));
-                String cooldownText = String.format("%.1f", ability.getCurrentCooldown());
-                FontMetrics fm = g.getFontMetrics();
-                int textWidth = fm.stringWidth(cooldownText);
-                g.drawString(cooldownText,
-                        skillX + (skillWidth - textWidth) / 2,
-                        skillY + skillHeight / 2 + 6);
-            }
-
-            // 키 라벨
-            g.setColor(Color.YELLOW);
-            g.setFont(new Font("맑은 고딕", Font.BOLD, 10));
-            FontMetrics fm = g.getFontMetrics();
-            int labelWidth = fm.stringWidth(keyLabels[i]);
-            g.drawString(keyLabels[i],
-                    skillX + (skillWidth - labelWidth) / 2,
-                    skillY - 5);
-
-            // 스킬 이름 (박스 아래)
-            g.setColor(Color.WHITE);
-            g.setFont(new Font("맑은 고딕", Font.PLAIN, 10));
-            fm = g.getFontMetrics();
-            int nameWidth = fm.stringWidth(ability.getName());
-            g.drawString(ability.getName(),
-                    skillX + (skillWidth - nameWidth) / 2,
-                    skillY + skillHeight + 15);
-        }
-    }
-
-    /** 편집 모드 타일 오버레이 */
-    private void drawEditorOverlay(Graphics2D g2d) {
-        if (walkableGrid == null)
-            return;
-        // 반투명 레이어로 전체 walkable/unwalkable 시각화 (간단한 색)
-        int startCol = cameraX / TILE_SIZE;
-        int startRow = cameraY / TILE_SIZE;
-        int endCol = Math.min(gridCols - 1, (cameraX + GameConstants.GAME_WIDTH) / TILE_SIZE + 1);
-        int endRow = Math.min(gridRows - 1, (cameraY + GameConstants.GAME_HEIGHT) / TILE_SIZE + 1);
-
-        // 미니맵 영역 계산 (showMinimap이 true일 때만 제외)
-        Rectangle minimapRect = null;
-        if (showMinimap) {
-            int minimapWidth = 200;
-            int minimapHeight = 150;
-            // 캔버스 기준 좌표 사용
-            int minimapX = canvas.getWidth() - minimapWidth - 20;
-            int minimapY = 20;
-            minimapRect = new Rectangle(minimapX, minimapY, minimapWidth, minimapHeight);
-        }
-
-        for (int r = startRow; r <= endRow; r++) {
-            for (int c = startCol; c <= endCol; c++) {
-                boolean walkable = walkableGrid[r][c];
-                int px = c * TILE_SIZE - cameraX;
-                int py = r * TILE_SIZE - cameraY;
-
-                // 미니맵이 켜져있으면 미니맵 영역과 겹치는 타일 스킵
-                if (minimapRect != null) {
-                    Rectangle tileRect = new Rectangle(px, py, TILE_SIZE, TILE_SIZE);
-                    if (tileRect.intersects(minimapRect)) {
-                        continue;
-                    }
-                }
-
-                Color base = walkable ? new Color(0, 180, 0, 55) : new Color(180, 0, 0, 60);
-                if (isSpawnTile(redSpawnTiles, c, r)) {
-                    base = new Color(255, 60, 60, 120);
-                } else if (isSpawnTile(blueSpawnTiles, c, r)) {
-                    base = new Color(60, 120, 255, 120);
-                }
-                g2d.setColor(base);
-                g2d.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            }
-        }
-        // 호버 타일 강조
-        if (hoverCol >= 0 && hoverRow >= 0 && hoverCol < gridCols && hoverRow < gridRows) {
-            int hx = hoverCol * TILE_SIZE - cameraX;
-            int hy = hoverRow * TILE_SIZE - cameraY;
-            g2d.setColor(new Color(255, 255, 0, 120));
-            g2d.drawRect(hx, hy, TILE_SIZE - 1, TILE_SIZE - 1);
-        }
-        // 모드 안내 텍스트
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 12));
-        String modeName;
-        switch (editPaintMode) {
-            case 0 -> modeName = "이동 가능";
-            case 1 -> modeName = "이동 불가";
-            case 2 -> modeName = "RED 스폰";
-            case 3 -> modeName = "BLUE 스폰";
-            default -> modeName = "?";
-        }
-        g2d.drawString("[EDIT MODE] 1=Walk 2=Block 3=RedSpawn 4=BlueSpawn | 현재=" + modeName + " | 좌클릭/드래그 | F4 종료",
-                10, 20);
-        g2d.setFont(new Font("Arial", Font.PLAIN, 11));
-        g2d.drawString("저장: Ctrl+S / F5", 10, 35);
+        // 플레이어 정보
+        ctx.playerName = this.playerName;
+        ctx.team = this.team;
+        ctx.playerX = this.playerX;
+        ctx.playerY = this.playerY;
+        ctx.myDirection = this.myDirection;
+        ctx.myAnimations = this.myAnimations;
+        ctx.myHP = gameState.getMyHP();
+        ctx.myMaxHP = gameState.getMyMaxHP();
+        
+        // 마우스 좌표: 렌더링과 동일한 방식으로 계산
+        // actualCanvasWidth/Height를 사용하여 렌더링 시점의 스케일과 일치
+        int actualWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        int actualHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        double scaleX = (double) actualWidth / GameConstants.GAME_WIDTH;
+        double scaleY = (double) actualHeight / GameConstants.GAME_HEIGHT;
+        ctx.mouseX = (int) (rawMouseX / scaleX);
+        ctx.mouseY = (int) (rawMouseY / scaleY);
+        
+        ctx.selectedCharacter = gameState.getSelectedCharacter();
+        ctx.currentCharacterData = gameState.getCurrentCharacterData();
+        
+        // 게임 오브젝트
+        ctx.players = this.players;
+        ctx.missiles = this.missiles;
+        ctx.placedObjects = this.placedObjects;
+        ctx.strikeMarkers = this.strikeMarkers;
+        
+        // 이펙트
+        ctx.myEffects = this.myEffects;
+        ctx.skillEffects = this.skillEffects;
+        
+        // UI 상태
+        ctx.showMinimap = this.showMinimap;
+        ctx.editMode = this.editMode;
+        ctx.kills = gameState.getKills();
+        ctx.deaths = gameState.getDeaths();
+        ctx.abilities = this.abilities;
+        
+        // 라운드 정보
+        ctx.redWins = this.redWins;
+        ctx.blueWins = this.blueWins;
+        ctx.roundCount = this.roundCount;
+        ctx.roundState = this.roundState;
+        ctx.roundStartTime = this.roundStartTime;
+        ctx.centerMessage = this.centerMessage;
+        ctx.centerMessageEndTime = this.centerMessageEndTime;
+        
+        // 파이퍼 스킬
+        ctx.piperMarkRemaining = this.piperMarkRemaining;
+        ctx.piperThermalRemaining = this.piperThermalRemaining;
+        ctx.teamMarkRemaining = this.teamMarkRemaining;
+        ctx.teamThermalRemaining = this.teamThermalRemaining;
+        
+        // 캔버스 크기 - 고정 렌더링 크기와 실제 크기 분리
+        ctx.canvasWidth = GameConstants.GAME_WIDTH;   // 항상 1280 (고정)
+        ctx.canvasHeight = GameConstants.GAME_HEIGHT; // 항상 720 (고정)
+        ctx.actualCanvasWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        ctx.actualCanvasHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        
+        // 에디터
+        ctx.walkableGrid = this.walkableGrid;
+        ctx.tileSize = TILE_SIZE;
+        ctx.gridCols = this.gridCols;
+        ctx.gridRows = this.gridRows;
+        
+        return ctx;
     }
 
     public GamePanel(String playerName, int team, Socket socket, DataOutputStream out, DataInputStream in,
             String characterId) {
         super("FPS Game - " + playerName);
+        
+        // Backward compatibility
         this.playerName = playerName;
         this.team = team;
+        
+        // GameState 초기화
+        this.gameState = new GameState(playerName, team);
+        
         this.socket = socket;
         this.out = out;
         this.in = in;
+        
+        // NetworkClient 초기화
+        this.networkClient = new NetworkClient(socket, out, in);
+        this.networkClient.setOnMessageReceived(this::processGameMessage);
+        
+        // GameRenderer 초기화 - 파라미터 없는 생성자 사용
+        this.gameRenderer = new GameRenderer();
+        
+        // GameMessageHandler 초기화
+        this.messageHandler = new GameMessageHandler(this);
+        
+        // Phase 2: 매니저 초기화
+        this.mapManager = new MapManager(this::appendChatMessage);
+        // UIManager는 나중에 UI 초기화 시 사용 (콜백 불필요)
+        this.uiManager = new UIManager(
+            msg -> {
+                if (!msg.isEmpty() && out != null) {
+                    networkClient.sendChat(msg);
+                }
+            },
+            messageHandler::handleMenuAction
+        );
+        this.gameLogicController = new GameLogicController(this::appendChatMessage);
+        this.collisionManager = new CollisionManager(TILE_SIZE);
+        this.movementController = new PlayerMovementController(SPEED, collisionManager);
+        this.spawnManager = new SpawnManager();
+        this.objectManager = new GameObjectManager(collisionManager);
+        
+        // objectManager의 컬렉션 참조 연결
+        this.missiles = objectManager.getMissiles();
+        this.placedObjects = objectManager.getPlacedObjects();
+        this.strikeMarkers = objectManager.getStrikeMarkers();
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
-        this.selectedCharacter = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
-        this.currentCharacterData = CharacterData.getById(selectedCharacter);
+        String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
+        CharacterData charData = CharacterData.getById(selectedChar);
+        
+        // GameState에 캐릭터 정보 설정
+        gameState.setSelectedCharacter(selectedChar);
+        gameState.setCurrentCharacterData(charData);
 
         // HP 초기화 (중요: 캐릭터별 MaxHP 적용)
-        this.myMaxHP = (int) currentCharacterData.health;
-        this.myHP = this.myMaxHP;
+        int maxHp = (int) charData.health;
+        gameState.setMyMaxHP(maxHp);
+        gameState.setMyHP(maxHp);
 
-        // 스킬 초기화
-        this.abilities = CharacterData.createAbilities(selectedCharacter);
+        // 스킬 초기화 (로컬 유지 - 매 프레임 update)
+        this.abilities = CharacterData.createAbilities(selectedChar);
+        gameState.setAbilities(this.abilities);
+        
+        // SkillManager 초기화 (abilities 필요)
+        this.skillManager = new SkillManager(this.abilities, this::appendChatMessage);
 
-        // 맵 로드
+        // 기본 맵 로드 (서버 ROUND_START에서 다른 맵으로 변경 가능)
         loadMap(currentMapName);
 
         // 플레이어 초기 위치 (팀별 스폰 지역)
@@ -1180,12 +519,10 @@ public class GamePanel extends JFrame implements KeyListener {
      * BLUE 팀 = 오른쪽 하단 (파랑 스폰 지역)
      */
     private void setInitialSpawnPosition() {
-        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
-        if (tiles != null && !tiles.isEmpty()) {
-            java.util.Random rand = new java.util.Random();
-            int[] t = tiles.get(rand.nextInt(tiles.size()));
-            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
-            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
+        SpawnManager.SpawnPosition pos = spawnManager.getInitialSpawnPosition(team, mapWidth, mapHeight);
+        if (pos != null) {
+            playerX = pos.x;
+            playerY = pos.y;
         } else {
             appendChatMessage("[경고] 팀 스폰 타일이 비어 있습니다. 맵 JSON의 spawns." +
                     (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
@@ -1210,7 +547,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 채팅 패널 (오른쪽)
         JPanel chatPanel = new JPanel(new BorderLayout());
-        chatPanel.setPreferredSize(new Dimension(250, GameConstants.GAME_HEIGHT));
+        chatPanel.setPreferredSize(new Dimension(CHAT_PANEL_WIDTH, 800)); // 창 높이에 맞춤
         chatPanel.setBackground(new Color(32, 34, 37));
 
         // 채팅 영역
@@ -1310,28 +647,36 @@ public class GamePanel extends JFrame implements KeyListener {
         setJMenuBar(menuBar);
     }
 
+    // ==================== Manager Getters ====================
+    
+    public MapManager getMapManager() { return mapManager; }
+    public SkillManager getSkillManager() { return skillManager; }
+    public UIManager getUIManager() { return uiManager; }
+    public GameLogicController getGameLogicController() { return gameLogicController; }
+
+    // ==================== Chat Methods ====================
+
     private void sendChatMessage() {
         String message = chatInput.getText().trim();
         if (!message.isEmpty() && out != null) {
-            try {
-                // 서버로 전송 (로컬 에코 제거 - 서버 응답만 표시)
-                out.writeUTF("CHAT:" + message);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("채팅 전송 실패");
-            }
+            networkClient.sendChat(message);
             chatInput.setText("");
         }
         // 채팅 전송 후 게임 캔버스로 포커스 복귀
         canvas.requestFocusInWindow();
     }
+    
+    /**
+     * UIManager 메뉴 액션 처리
+     */
+    // 메뉴 액션은 GameMessageHandler에서 관리하도록 변경됨
 
     // 채팅/시스템 로그 스로틀링
     private String lastChatMessage = null;
     private long lastChatTime = 0L;
     private static final long CHAT_THROTTLE_MS = 1000;
 
-    private void appendChatMessage(String message) {
+    void appendChatMessage(String message) {
         long now = System.currentTimeMillis();
         if (message != null && message.equals(lastChatMessage) && (now - lastChatTime) < CHAT_THROTTLE_MS) {
             return; // 동일 메시지 연속 출력 최소화
@@ -1347,7 +692,7 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * 맵 로드 및 장애물 설정
      */
-    private void loadMap(String mapName) {
+    void loadMap(String mapName) {
         try {
             // 맵 이미지 로드 (assets/maps/ 경로)
             java.io.File mapFile = new java.io.File("assets/maps/" + mapName + ".png");
@@ -1364,7 +709,7 @@ public class GamePanel extends JFrame implements KeyListener {
             } else {
                 appendChatMessage("[시스템] 맵 파일 없음: " + mapFile.getAbsolutePath());
             }
-        } catch (Exception e) {
+        } catch (java.io.IOException e) {
             appendChatMessage("[시스템] 맵 로드 에러: " + e.getMessage());
             // 폴백: 기본 크기 유지
         }
@@ -1386,9 +731,18 @@ public class GamePanel extends JFrame implements KeyListener {
         ensureSpawnZonesWalkable();
 
         // 4) JSON에 스폰 구역이 정의되지 않은 경우 에러 처리
-        if (redSpawnZone == null || blueSpawnZone == null) {
+        if (!spawnManager.hasValidSpawnZones()) {
             appendChatMessage("[경고] 스폰 구역이 JSON에 정의되지 않았습니다. 게임 시작 불가!");
         }
+        
+        // 5) CollisionManager 업데이트
+        collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
+        
+        // 6) MovementController 맵 크기 업데이트
+        movementController.updateMapSize(mapWidth, mapHeight);
+        
+        // 7) ObjectManager 맵 크기 업데이트
+        objectManager.updateMapSize(mapWidth, mapHeight);
     }
 
     /**
@@ -1477,8 +831,23 @@ public class GamePanel extends JFrame implements KeyListener {
         loadMap(newMapName);
         setInitialSpawnPosition();
         updateCamera();
-        missiles.clear();
+        objectManager.clearMissiles();
         sendPosition();
+    }
+    
+    /**
+     * 다음 맵으로 순환 전환
+     */
+    void cycleNextMap() {
+        rebuildMapCycle();
+        if (mapCycle == null || mapCycle.isEmpty()) {
+            appendChatMessage("[시스템] 전환 가능한 맵이 없습니다.");
+        } else {
+            int idx = mapCycle.indexOf(currentMapName);
+            idx = (idx >= 0) ? (idx + 1) % mapCycle.size() : 0;
+            mapIndex = idx;
+            switchMap(mapCycle.get(idx));
+        }
     }
 
     /**
@@ -1613,6 +982,10 @@ public class GamePanel extends JFrame implements KeyListener {
         blueSpawnTiles.clear();
         redSpawnZone = extractSpawnZone(json, "red", redSpawnTiles);
         blueSpawnZone = extractSpawnZone(json, "blue", blueSpawnTiles);
+        
+        // SpawnManager에 스폰 정보 설정
+        spawnManager.setSpawnZones(redSpawnZone, blueSpawnZone);
+        spawnManager.setSpawnTiles(new ArrayList<>(redSpawnTiles), new ArrayList<>(blueSpawnTiles));
 
         // 스폰 구역은 항상 walkable로 강제
         ensureSpawnZonesWalkable();
@@ -1771,6 +1144,24 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
+    // ==================== 유틸리티 메서드 ====================
+    
+    /**
+     * 화면 좌표를 스케일 보정된 게임 좌표로 변환
+     */
+    private java.awt.Point scaleMouseCoordinates(int screenX, int screenY) {
+        // canvas 크기를 사용 (렌더링과 동일한 기준)
+        int actualWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        int actualHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        double scaleX = (double) actualWidth / GameConstants.GAME_WIDTH;
+        double scaleY = (double) actualHeight / GameConstants.GAME_HEIGHT;
+        
+        return new java.awt.Point(
+            (int) (screenX / scaleX),
+            (int) (screenY / scaleY)
+        );
+    }
+    
     /**
      * 맵 이미지 픽셀 분석으로 장애물 자동 추출
      * - 밝은 회색(길) + 스폰 지역만 이동 가능
@@ -1917,8 +1308,8 @@ public class GamePanel extends JFrame implements KeyListener {
         });
         timer.start();
 
-        // 서버 메시지 수신 스레드
-        new Thread(this::receiveGameUpdates).start();
+        // 서버 메시지 수신 스레드 (NetworkClient로 위임)
+        networkClient.startReceiving();
     }
 
     private void updateGame() {
@@ -2077,29 +1468,33 @@ public class GamePanel extends JFrame implements KeyListener {
     private void updatePlayerPosition() {
         int oldX = playerX;
         int oldY = playerY;
-        int newX = playerX;
-        int newY = playerY;
 
         // 버프 적용된 이동 속도 계산
         int effectiveSpeed = (int) (SPEED * moveSpeedMultiplier);
+        
+        // 키 입력 배열 준비 (WASD와 화살표 키 통합)
+        boolean[] moveKeys = new boolean[256];
+        moveKeys['W'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_FORWARD)] || keys[KeyEvent.VK_UP];
+        moveKeys['w'] = moveKeys['W'];
+        moveKeys['S'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_BACKWARD)] || keys[KeyEvent.VK_DOWN];
+        moveKeys['s'] = moveKeys['S'];
+        moveKeys['A'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_LEFT)] || keys[KeyEvent.VK_LEFT];
+        moveKeys['a'] = moveKeys['A'];
+        moveKeys['D'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_RIGHT)] || keys[KeyEvent.VK_RIGHT];
+        moveKeys['d'] = moveKeys['D'];
 
-        // 사용자 설정 키 바인딩 사용
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_FORWARD)] || keys[KeyEvent.VK_UP]) {
-            newY -= effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_BACKWARD)] || keys[KeyEvent.VK_DOWN]) {
-            newY += effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_LEFT)] || keys[KeyEvent.VK_LEFT]) {
-            newX -= effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_RIGHT)] || keys[KeyEvent.VK_RIGHT]) {
-            newX += effectiveSpeed;
-        }
+        // 임시 이동 컨트롤러로 위치 계산 (속도 버프 적용)
+        PlayerMovementController tempController = new PlayerMovementController(effectiveSpeed, collisionManager);
+        tempController.updateMapSize(mapWidth, mapHeight);
+        PlayerMovementController.PlayerPosition newPos = new PlayerMovementController.PlayerPosition(playerX, playerY);
+        tempController.updatePlayerPosition(playerX, playerY, moveKeys, newPos);
+        
+        int newX = newPos.x;
+        int newY = newPos.y;
 
         // 라운드 대기 상태일 때 스폰 구역 이탈 방지
         if (roundState == RoundState.WAITING) {
-            Rectangle spawnZone = (team == GameConstants.TEAM_RED) ? redSpawnZone : blueSpawnZone;
+            Rectangle spawnZone = spawnManager.getSpawnZone(team);
             if (spawnZone != null) {
                 // 플레이어 중심점 기준 체크 및 클램핑
                 // 플레이어 크기 고려 (반경 20)
@@ -2122,24 +1517,9 @@ public class GamePanel extends JFrame implements KeyListener {
                 newY = Math.max(minY, Math.min(newY, maxY));
             }
         }
-
-        // 맵 경계 체크 (큰 맵)
-        newX = Math.max(20, Math.min(newX, mapWidth - 20));
-        newY = Math.max(20, Math.min(newY, mapHeight - 20));
-
-        // 장애물 충돌 체크
-        if (!checkCollisionWithObstacles(newX, newY)) {
-            playerX = newX;
-            playerY = newY;
-        } else {
-            // 장애물과 충돌 시 X축과 Y축 개별 체크
-            if (!checkCollisionWithObstacles(newX, oldY)) {
-                playerX = newX;
-            }
-            if (!checkCollisionWithObstacles(oldX, newY)) {
-                playerY = newY;
-            }
-        }
+        
+        playerX = newX;
+        playerY = newY;
 
         // 카메라 업데이트
         updateCamera();
@@ -2154,109 +1534,49 @@ public class GamePanel extends JFrame implements KeyListener {
      * 장애물 충돌 체크
      */
     private boolean checkCollisionWithObstacles(int x, int y) {
-        // 1) walkableGrid가 있으면 우선 사용: walkable이 아니면 충돌 간주
-        if (walkableGrid != null) {
-            if (!isPositionWalkable(x, y))
-                return true; // 이동 불가 = 충돌
+        // CollisionManager에 위임
+        if (walkableGrid != null && !collisionManager.isPositionWalkable(x, y)) {
+            return true;
         }
-        // 2) 장애물 사각형 교차 검사 (폴백 및 보강)
-        Rectangle playerBounds = new Rectangle(x - 20, y - 20, 40, 40);
-        for (Rectangle obs : obstacles) {
-            if (playerBounds.intersects(obs)) {
-                return true; // 충돌 발생
-            }
-        }
-        return false; // 충돌 없음
-    }
-
-    /**
-     * 플레이어 반경을 샘플링하여 해당 위치가 모두 walkable인지 확인
-     */
-    private boolean isPositionWalkable(int x, int y) {
-        int r = 18; // 캐릭터 반경 근사
-        int[][] samples = new int[][] {
-                { x, y }, { x - r, y }, { x + r, y }, { x, y - r }, { x, y + r },
-                { x - r, y - r }, { x + r, y - r }, { x - r, y + r }, { x + r, y + r }
-        };
-        for (int[] p : samples) {
-            int cx = Math.max(0, Math.min(p[0], mapWidth - 1));
-            int cy = Math.max(0, Math.min(p[1], mapHeight - 1));
-            int col = cx / TILE_SIZE;
-            int row = cy / TILE_SIZE;
-            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols)
-                return false;
-            if (!walkableGrid[row][col])
-                return false;
-        }
-        return true;
+        return collisionManager.checkCollisionWithObstacles(x, y);
     }
 
     /**
      * 카메라 업데이트 (플레이어 중심)
      */
     private void updateCamera() {
-        // 플레이어를 화면 중앙에 위치
-        cameraX = playerX - GameConstants.GAME_WIDTH / 2;
-        cameraY = playerY - GameConstants.GAME_HEIGHT / 2;
-
-        // 카메라가 맵 경계를 벗어나지 않도록 제한
-        cameraX = Math.max(0, Math.min(cameraX, mapWidth - GameConstants.GAME_WIDTH));
-        cameraY = Math.max(0, Math.min(cameraY, mapHeight - GameConstants.GAME_HEIGHT));
+        PlayerMovementController.CameraPosition camera = new PlayerMovementController.CameraPosition(cameraX, cameraY);
+        movementController.updateCamera(playerX, playerY, camera);
+        cameraX = camera.x;
+        cameraY = camera.y;
     }
 
     private void updateMissiles() {
-        Iterator<Missile> it = missiles.iterator();
-        while (it.hasNext()) {
-            Missile m = it.next();
-            m.x += m.dx;
-            m.y += m.dy;
-            // 맵 밖이면 제거 (전체 맵 기준)
-            if (m.x < 0 || m.x > mapWidth || m.y < 0 || m.y > mapHeight) {
-                it.remove();
-                continue;
-            }
-            // 벽 충돌: 타일 walkable 여부 + 장애물 Rect 교차
-            if (isMissileBlocked(m.x, m.y)) {
-                it.remove();
-                continue;
-            }
-        }
+        objectManager.updateMissiles();
     }
 
     private boolean isMissileBlocked(int x, int y) {
-        // 타일 기반
-        if (walkableGrid != null) {
-            int col = x / TILE_SIZE;
-            int row = y / TILE_SIZE;
-            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols)
-                return true;
-            if (!walkableGrid[row][col])
-                return true;
-        }
-        // 장애물 Rect (정밀)
-        Rectangle r = new Rectangle(x - 2, y - 2, 4, 4);
-        for (Rectangle obs : obstacles) {
-            if (r.intersects(obs))
-                return true;
-        }
-        return false;
+        return collisionManager.isMissileBlocked(x, y);
     }
 
     private void checkCollisions() {
         // 내 미사일과 다른 플레이어 충돌
-        Iterator<Missile> it = missiles.iterator();
+        Iterator<GameObjectManager.Missile> it = missiles.iterator();
         while (it.hasNext()) {
-            Missile m = it.next();
-            if (m.team == team) {
+            GameObjectManager.Missile m = it.next();
+            if (m.team == team && m.owner != null && m.owner.equals(playerName)) {
                 // 적 플레이어와 충돌 체크
                 boolean hit = false;
                 for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
                     PlayerData p = entry.getValue();
                     if (p.team != team) {
-                        double dist = Math.sqrt(Math.pow(m.x - p.x, 2) + Math.pow(m.y - p.y, 2));
-                        if (dist < 20) {
+                        if (collisionManager.checkMissilePlayerCollision(m.x, m.y, p.x, p.y)) {
                             it.remove();
                             hit = true;
+                            // 서버에 적 플레이어 피격 보고
+                            String targetName = entry.getKey();
+                            networkClient.sendHitReport("HIT:" + targetName);
+                            System.out.println("[HIT] My missile hit " + targetName);
                             break;
                         }
                     }
@@ -2264,19 +1584,14 @@ public class GamePanel extends JFrame implements KeyListener {
 
                 // 설치된 오브젝트와 충돌 체크 (적 오브젝트만)
                 if (!hit) {
-                    for (Map.Entry<Integer, PlacedObjectClient> entry : placedObjects.entrySet()) {
-                        PlacedObjectClient obj = entry.getValue();
+                    for (Map.Entry<Integer, GameObjectManager.PlacedObjectClient> entry : placedObjects.entrySet()) {
+                        GameObjectManager.PlacedObjectClient obj = entry.getValue();
                         if (obj.team != team && obj.hp > 0) {
-                            double dist = Math.sqrt(Math.pow(m.x - obj.x, 2) + Math.pow(m.y - obj.y, 2));
-                            if (dist < 30) {
+                            if (collisionManager.checkMissileObjectCollision(m.x, m.y, obj.x, obj.y)) {
                                 it.remove();
                                 // 서버에 오브젝트 피격 보고
-                                try {
-                                    out.writeUTF("HIT_OBJ:" + obj.id);
-                                    out.flush();
-                                } catch (IOException ex) {
-                                    appendChatMessage("[네트워크] 오브젝트 피격 전송 실패");
-                                }
+                                networkClient.sendHitReport("HIT_OBJ:" + obj.id);
+                                System.out.println("[HIT_OBJ] My missile hit object " + obj.id);
                                 break;
                             }
                         }
@@ -2286,23 +1601,27 @@ public class GamePanel extends JFrame implements KeyListener {
         }
 
         // 적 미사일과 내가 맞았는지 체크 (피해자 측 리포트)
-        Iterator<Missile> enemyIt = missiles.iterator();
+        Iterator<GameObjectManager.Missile> enemyIt = missiles.iterator();
         while (enemyIt.hasNext()) {
-            Missile m = enemyIt.next();
+            GameObjectManager.Missile m = enemyIt.next();
             if (m.team != team) {
                 double dist = Math.sqrt(Math.pow(m.x - playerX, 2) + Math.pow(m.y - playerY, 2));
                 if (dist < 20) {
                     enemyIt.remove();
-                    try {
-                        if (m.owner != null) {
-                            out.writeUTF("HITME:" + m.owner);
-                        } else {
-                            out.writeUTF("DEATH");
+                    if (m.owner != null) {
+                        // 터렛 미사일인 경우 TURRET: 접두사가 이미 포함되어 있음
+                        String ownerInfo = m.owner;
+                        // 자기 자신의 터렛에 맞지 않도록 체크
+                        if (ownerInfo.startsWith("TURRET:")) {
+                            String turretOwner = ownerInfo.substring(7);
+                            if (turretOwner.equals(playerName)) {
+                                System.out.println("[DEBUG] Ignored own turret missile hit");
+                                continue; // 자기 터렛 미사일은 무시
+                            }
                         }
-                        out.flush();
-                    } catch (IOException ex) {
-                        System.err.println("[ERROR] Failed to send DEATH message");
-                        ex.printStackTrace(System.err);
+                        networkClient.sendHitReport("HITME:" + ownerInfo);
+                    } else {
+                        networkClient.sendHitReport("DEATH");
                     }
                     break;
                 }
@@ -2310,14 +1629,12 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    private void respawn() {
-        // 반드시 지정된 스폰 타일 중에서만 랜덤 스폰
-        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
-        if (tiles != null && !tiles.isEmpty()) {
-            java.util.Random rand = new java.util.Random();
-            int[] t = tiles.get(rand.nextInt(tiles.size()));
-            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
-            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
+    void respawn() {
+        // SpawnManager로 스폰 위치 계산
+        SpawnManager.SpawnPosition pos = spawnManager.getRandomSpawnPosition(team);
+        if (pos != null) {
+            playerX = pos.x;
+            playerY = pos.y;
         } else {
             appendChatMessage("[경고] 팀 스폰 타일이 비어 있어 임시 위치에 리스폰합니다. 맵 JSON의 spawns." +
                     (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
@@ -2325,7 +1642,7 @@ public class GamePanel extends JFrame implements KeyListener {
             playerX = mapWidth / 2;
             playerY = mapHeight / 2;
         }
-        myHP = myMaxHP;
+        gameState.setMyHP(gameState.getMyMaxHP());
 
         appendChatMessage("[리스폰] 위치: (" + playerX + ", " + playerY + ")");
 
@@ -2341,12 +1658,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
     private void sendPosition() {
         if (out != null) {
-            try {
-                out.writeUTF("POS:" + playerX + "," + playerY + "," + myDirection);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("[에러] 위치 전송 실패: " + ex.getMessage());
-            }
+            networkClient.sendPosition(playerX, playerY, myDirection);
         }
     }
 
@@ -2367,8 +1679,8 @@ public class GamePanel extends JFrame implements KeyListener {
         double ny = (len > 0) ? (vy / len) : -1.0;
         int dx = (int) Math.round(nx * speed);
         int dy = (int) Math.round(ny * speed);
-        Missile missile = new Missile(sx, sy, dx, dy, team, playerName);
-        missiles.add(missile);
+        GameObjectManager.Missile missile = new GameObjectManager.Missile(sx, sy, dx, dy, team, playerName);
+        objectManager.addMissile(missile);
 
         if (out != null) {
             try {
@@ -2384,603 +1696,33 @@ public class GamePanel extends JFrame implements KeyListener {
         skillEffects.addSelf(new MuzzleFlashEffect(angle));
     }
 
-    private void receiveGameUpdates() {
-        try {
-            String message;
-            while ((message = in.readUTF()) != null) {
-                processGameMessage(message);
-            }
-        } catch (IOException ex) {
-            System.out.println("서버와의 연결이 끊어졌습니다.");
-        }
-    }
-
     private void processGameMessage(String message) {
-        String[] parts = message.split(":", 2);
-        if (parts.length < 2)
-            return;
-
-        String command = parts[0];
-        String data = parts[1];
-
-        switch (command) {
-            case "CHAT":
-                // 채팅 메시지 표시 (서버에서 받은 모든 메시지 표시)
-                appendChatMessage(data);
-                break;
-
-            case "CHARACTER_SELECT":
-                // CHARACTER_SELECT: 플레이어 이름, 캐릭터 ID
-                String[] cs = data.split(",");
-                if (cs.length >= 2) {
-                    String pName = cs[0];
-                    String charId = cs[1];
-                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(charId);
-                    int newMaxHp = (int) cd.health;
-
-                    if (pName.equals(playerName)) {
-                        selectedCharacter = charId;
-                        myMaxHP = newMaxHp;
-                        // HP updated immediately; server STATS will confirm.
-                        currentCharacterData = cd;
-                        myHP = newMaxHp;
-                        abilities = CharacterData.createAbilities(selectedCharacter);
-                        hasChangedCharacterInRound = true;
-                        
-                        // 선택한 캐릭터 저장 (게임 중 변경사항 지속)
-                        GameConfig.saveCharacter(charId);
-                        
-                        // 내 스프라이트 재로드
-                        loadSprites();
-                        // 스프라이트가 제대로 로드되었는지 확인
-                        System.out.println("[CHARACTER_SELECT] 캐릭터 변경: " + charId + ", maxHP: " + newMaxHp + ", 현재 HP: " + myHP);
-                        repaint();
-                        appendChatMessage("[캐릭터] " + cd.name + "으로 변경되었습니다.");
-                    } else {
-                        PlayerData pd = players.get(pName);
-                        if (pd == null) {
-                            // 플레이어가 아직 없으면 생성 (위치는 나중에 PLAYER 메시지로 업데이트됨)
-                            pd = new PlayerData(0, 0, GameConstants.TEAM_RED); // 임시 위치
-                            pd.characterId = charId;
-                            pd.maxHp = newMaxHp;
-                            pd.hp = newMaxHp;
-                            players.put(pName, pd);
-                        } else {
-                            pd.characterId = charId;
-                            pd.maxHp = newMaxHp;
-                            pd.hp = newMaxHp; // HP도 즉시 업데이트
-                        }
-                        // 원격 플레이어 스프라이트 로드
-                        loadPlayerSprites(pd, charId);
-                        System.out.println(
-                                "[CHARACTER_SELECT] 원격 플레이어: " + pName + " -> " + charId + ", HP: " + newMaxHp);
-                        appendChatMessage("[캐릭터] " + pName + " -> " + cd.name);
-                    }
-                }
-                break;
-
-            case "PLAYER":
-                // PLAYER:name,x,y,team,hp,characterId,direction
-                String[] playerData = data.split(",");
-                if (playerData.length >= 5) {
-                    String name = playerData[0];
-                    if (!name.equals(playerName)) {
-                        int x = (int) Float.parseFloat(playerData[1]);
-                        int y = (int) Float.parseFloat(playerData[2]);
-                        int t = Integer.parseInt(playerData[3]);
-                        int hp = Integer.parseInt(playerData[4]);
-                        String charId = (playerData.length >= 6) ? playerData[5] : "raven";
-                        int direction = (playerData.length >= 7) ? Integer.parseInt(playerData[6]) : 0;
-
-                        PlayerData pd = players.get(name);
-                        if (pd == null) {
-                            pd = new PlayerData(x, y, t);
-                            pd.hp = hp;
-                            pd.characterId = charId;
-                            pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                            pd.direction = direction; // 방향 설정
-                            players.put(name, pd);
-                            // 스프라이트 로드
-                            loadPlayerSprites(pd, charId);
-                            System.out
-                                    .println("[PLAYER] 새 플레이어 생성: " + name + ", 캐릭터: " + charId + ", 방향: " + direction);
-                        } else {
-                            // 보간을 위해 목표 위치 설정 (즉시 이동하지 않음)
-                            pd.targetX = x;
-                            pd.targetY = y;
-                            pd.hp = hp;
-                            pd.direction = direction; // 방향 업데이트
-
-                            // 캐릭터 ID가 변경되었거나 스프라이트가 로드되지 않았으면 로드
-                            if (charId != null && (!charId.equalsIgnoreCase(pd.characterId) || pd.animations == null)) {
-                                pd.characterId = charId;
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                                loadPlayerSprites(pd, charId);
-                                System.out
-                                        .println("[PLAYER] 캐릭터 변경: " + name + " -> " + charId + ", maxHP: " + pd.maxHp);
-                            } else if (charId != null) {
-                                // 캐릭터 변경이 없어도 maxHp 업데이트 (동기화 보장)
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                            }
-                        }
-                    }
-                }
-                break;
-
-            case "REMOVE":
-                // 플레이어 제거
-                players.remove(data);
-                break;
-
-            case "KILL":
-                // 처치 알림(스탯 증가는 서버에서 STATS로 동기화)
-                appendChatMessage(">>> 당신이 " + data + "를 처치했습니다!");
-                break;
-
-            case "STATS":
-                // STATS:name,kills,deaths,hp,characterId
-                String[] s = data.split(",");
-                if (s.length >= 4) {
-                    String name = s[0];
-                    int k = Integer.parseInt(s[1]);
-                    int d = Integer.parseInt(s[2]);
-                    int hp = Integer.parseInt(s[3]);
-                    // characterId는 포함되어 있으나, 검증용으로만 사용 (절대 캐릭터 변경하지 않음)
-                    // String charId = s.length >= 5 ? s[4] : null; // 읽지만 사용하지 않음
-
-                    if (name.equals(playerName)) {
-                        // ===== 내 캐릭터: HP/kills/deaths만 업데이트 =====
-                        kills = k;
-                        deaths = d;
-                        myHP = hp;
-                        
-                        // maxHP는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
-                        if (currentCharacterData != null) {
-                            myMaxHP = (int) currentCharacterData.health;
-                        }
-
-                        System.out.println("[STATS] " + playerName + " HP: " + myHP + "/" + myMaxHP + " (Character: " + selectedCharacter + ")");
-
-                        // 서버 기준으로 사망 상태면 즉시 리스폰
-                        if (myHP <= 0) {
-                            respawn();
-                        }
-                    } else {
-                        // ===== 원격 플레이어: HP/kills/deaths만 업데이트 =====
-                        PlayerData pd = players.get(name);
-                        if (pd != null) {
-                            pd.kills = k;
-                            pd.deaths = d;
-                            pd.hp = hp;
-
-                            // maxHp는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
-                            if (pd.characterId != null) {
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(pd.characterId).health;
-                            }
-                            
-                            System.out.println("[STATS] " + name + " HP: " + pd.hp + "/" + pd.maxHp + " (Character: " + pd.characterId + ")");
-                        }
-                    }
-                }
-                break;
-
-            case "SHOOT":
-                // SHOOT:playerName,x,y,dx,dy
-                String[] shootData = data.split(",");
-                if (shootData.length >= 5) {
-                    String shooter = shootData[0];
-                    if (!shooter.equals(playerName)) {
-                        int sx = (int) Float.parseFloat(shootData[1]);
-                        int sy = (int) Float.parseFloat(shootData[2]);
-                        int dx = (int) Float.parseFloat(shootData[3]);
-                        int dy = (int) Float.parseFloat(shootData[4]);
-
-                        // 다른 플레이어가 발사한 미사일 생성
-                        PlayerData pd = players.get(shooter);
-                        if (pd != null) {
-                            Missile m = new Missile(sx, sy, dx, dy, pd.team, shooter);
-                            missiles.add(m);
-                            // 원격 총구 섬광 이펙트 (발사 방향 기반)
-                            double ang = Math.atan2(dy, dx);
-                            skillEffects.addForPlayer(shooter, new MuzzleFlashEffect(ang));
-                        }
-                    }
-                }
-                break;
-
-            case "SKILL": {
-                // SKILL:playerName,abilityId,type,duration
-                String[] sd = data.split(",");
-                if (sd.length >= 4) {
-                    String user = sd[0];
-                    String abilityId = sd[1];
-                    String type = sd[2];
-                    float duration = 0.4f;
-                    try {
-                        duration = Float.parseFloat(sd[3]);
-                    } catch (NumberFormatException ignored) {
-                    }
-                    if (!user.equals(playerName)) {
-                        effectsByPlayer.computeIfAbsent(user, k -> new ArrayList<>())
-                                .add(new ActiveEffect(abilityId, type, Math.max(0.2f, duration)));
-                        // 구조화된 SkillEffect 등록 (원격 플레이어 시각 효과)
-                        if ("piper_mark".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new PiperMarkEffect(duration));
-                        } else if ("piper_thermal".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new PiperThermalEffect(duration));
-                        } else if ("raven_dash".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new RavenDashEffect(duration));
-                        } else if ("raven_overcharge".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new RavenOverchargeEffect(duration));
-                        } else if ("gen_aura".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GeneralAuraEffect(duration));
-                        } else if ("gen_strike".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GeneralStrikeEffect(duration));
-                            // } else if ("bull_cover".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new BulldogCoverEffect(duration));
-                            // } else if ("bull_barrage".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new BulldogBarrageEffect(duration));
-                            // } else if ("wild_breach".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new WildcatBreachEffect(duration));
-                            // } else if ("wild_berserk".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new WildcatBerserkEffect(duration));
-                        } else if ("ghost_cloak".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GhostCloakEffect(duration));
-                        } else if ("ghost_nullify".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GhostNullifyEffect(duration));
-                        } else if ("skull_adrenaline".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SkullAdrenalineEffect(duration));
-                        } else if ("skull_ammo".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SkullAmmoEffect(duration));
-                            // } else if ("steam_emp".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new SteamEmpEffect(duration));
-                            // } else if ("steam_reset".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new SteamResetEffect(duration));
-                        } else if ("tech_mine".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new TechMineEffect(duration));
-                        } else if ("tech_turret".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new TechTurretEffect(duration));
-                        } else if ("sage_heal".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SageHealEffect(duration));
-                        } else if ("sage_revive".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SageReviveEffect(duration));
-                        }
-                        // 같은 팀 Piper 마킹/열감지 공유
-                        PlayerData pdUser = players.get(user);
-                        if (pdUser != null && pdUser.team == team) {
-                            if ("piper_mark".equalsIgnoreCase(abilityId)) {
-                                teamMarkRemaining = Math.max(teamMarkRemaining, duration);
-                            } else if ("piper_thermal".equalsIgnoreCase(abilityId)) {
-                                teamThermalRemaining = Math.max(teamThermalRemaining, duration);
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-            case "TURRET_SHOOT": {
-                // TURRET_SHOOT:objId,tx,ty,targetName
-                String[] ts = data.split(",");
-                if (ts.length >= 4) {
-                    try {
-                        int turretId = Integer.parseInt(ts[0]);
-                        int tx = Integer.parseInt(ts[1]);
-                        int ty = Integer.parseInt(ts[2]);
-                        String targetName = ts[3];
-                        PlacedObjectClient turret = placedObjects.get(turretId);
-                        // 타겟 플레이어 객체가 없어도(예: 나 자신, 혹은 시야 밖) 좌표 기반으로 발사
-                        if (turret != null) {
-                            // Turret fires a missile toward target
-                            int sx = turret.x;
-                            int sy = turret.y;
-                            int dx = tx - sx;
-                            int dy = ty - sy;
-                            double distance = Math.sqrt(dx * dx + dy * dy);
-                            if (distance > 0) {
-                                int speed = 8;
-                                int missileVx = (int) (dx / distance * speed);
-                                int missileVy = (int) (dy / distance * speed);
-                                Missile m = new Missile(sx, sy, missileVx, missileVy, turret.team, "TURRET");
-                                missiles.add(m);
-                            }
-                            // Optional: turret muzzle flash effect
-                            double ang = Math.atan2(dy, dx);
-                            if (skillEffects != null)
-                                skillEffects.addForObject(turretId, new TurretShootEffect(ang));
-                        }
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "PLACE": {
-                // PLACE:objId,type,x,y,hp,maxHp,owner,team
-                String[] placeParts = data.split(",");
-                if (placeParts.length >= 8) {
-                    try {
-                        int id = Integer.parseInt(placeParts[0]);
-                        String type = placeParts[1];
-                        int x = Integer.parseInt(placeParts[2]);
-                        int y = Integer.parseInt(placeParts[3]);
-                        int hp = Integer.parseInt(placeParts[4]);
-                        int maxHp = Integer.parseInt(placeParts[5]);
-                        String owner = placeParts[6];
-                        int objTeam = Integer.parseInt(placeParts[7]);
-
-                        PlacedObjectClient obj = new PlacedObjectClient(id, type, x, y, hp, maxHp, owner, objTeam);
-                        placedObjects.put(id, obj);
-                        appendChatMessage("[오브젝트] " + owner + " 님이 " + type + " 설치!");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "OBJ_UPDATE": {
-                // OBJ_UPDATE:objId,hp
-                String[] updateParts = data.split(",");
-                if (updateParts.length >= 2) {
-                    try {
-                        int id = Integer.parseInt(updateParts[0]);
-                        int hp = Integer.parseInt(updateParts[1]);
-                        PlacedObjectClient obj = placedObjects.get(id);
-                        if (obj != null) {
-                            obj.hp = hp;
-                        }
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "OBJ_DESTROY": {
-                // OBJ_DESTROY:objId
-                // 라운드 종료 시 오브젝트 일괄 제거
-                try {
-                    int id = Integer.parseInt(data);
-                    PlacedObjectClient obj = placedObjects.remove(id);
-                    if (obj != null) {
-                        appendChatMessage("[오브젝트] " + obj.type + " 파괴됨!");
-                    }
-                } catch (NumberFormatException ignored) {
-                }
-                break;
-            }
-
-            case "BUFF": {
-                // BUFF:targetName,abilityId,moveSpeedMult,attackSpeedMult,durationRemaining
-                String[] buffParts = data.split(",");
-                if (buffParts.length >= 5 && buffParts[0].equals(playerName)) {
-                    try {
-                        moveSpeedMultiplier = Float.parseFloat(buffParts[2]);
-                        attackSpeedMultiplier = Float.parseFloat(buffParts[3]);
-
-                        // 공격속도 버프를 abilities[0] 쿨다운에 적용 (attackSpeedMultiplier가 1.15라면 쿨다운은 1/1.15 =
-                        // 0.87로 단축)
-                        if (abilities != null && abilities.length > 0) {
-                            abilities[0].setCooldownMultiplier(1f / attackSpeedMultiplier);
-                        }
-
-                        appendChatMessage("[버프] 오라 버프 활성! (이동속도 +" + ((moveSpeedMultiplier - 1) * 100) + "%, 공격속도 +"
-                                + ((attackSpeedMultiplier - 1) * 100) + "%)");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "UNBUFF": {
-                // UNBUFF:abilityId
-                if ("gen_aura".equals(data)) {
-                    moveSpeedMultiplier = 1.0f;
-                    attackSpeedMultiplier = 1.0f;
-
-                    // 공격속도 버프 해제 (쿨다운 배율 원상복구)
-                    if (abilities != null && abilities.length > 0) {
-                        abilities[0].setCooldownMultiplier(1f);
-                    }
-
-                    appendChatMessage("[버프] 오라 버프 종료");
-                }
-                break;
-            }
-
-            case "STRIKE_MARK": {
-                // STRIKE_MARK:strikeId,x,y
-                String[] markParts = data.split(",");
-                if (markParts.length >= 3) {
-                    try {
-                        int id = Integer.parseInt(markParts[0]);
-                        int x = Integer.parseInt(markParts[1]);
-                        int y = Integer.parseInt(markParts[2]);
-                        StrikeMarker marker = new StrikeMarker(id, x, y);
-                        strikeMarkers.put(id, marker);
-                        appendChatMessage("[에어스트라이크] 타겟 지정됨!");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "STRIKE_IMPACT": {
-                // STRIKE_IMPACT:strikeId,x,y,radius
-                String[] impactParts = data.split(",");
-                if (impactParts.length >= 4) {
-                    try {
-                        int id = Integer.parseInt(impactParts[0]);
-                        int x = Integer.parseInt(impactParts[1]);
-                        int y = Integer.parseInt(impactParts[2]);
-                        int radius = Integer.parseInt(impactParts[3]);
-
-                        strikeMarkers.remove(id);
-                        appendChatMessage("[에어스트라이크] 임팩트! (" + x + "," + y + ")");
-
-                        // TODO: 임팩트 시각 효과 (폭발 애니메이션)
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "ROUND_WIN": {
-                // ROUND_WIN:winningTeam,redWins,blueWins
-                String[] roundData = data.split(",");
-                if (roundData.length >= 3) {
-                    int winningTeam = Integer.parseInt(roundData[0]);
-                    redWins = Integer.parseInt(roundData[1]);
-                    blueWins = Integer.parseInt(roundData[2]);
-
-                    String winTeam = (winningTeam == GameConstants.TEAM_RED) ? "RED" : "BLUE";
-                    centerMessage = winTeam + " 팀 승리!";
-                    centerMessageEndTime = System.currentTimeMillis() + 2000;
-                    roundState = RoundState.ENDED;
-
-                    appendChatMessage("[라운드] " + winTeam + " 팀 승리! (점수: " + redWins + " : " + blueWins + ")");
-                }
-                break;
-            }
-
-            case "ROUND_START": {
-                // ROUND_START:roundNumber,mapId;playerCount;name1,charId1,hp1,maxHp1;name2,charId2,hp2,maxHp2;...
-                String[] mainParts = data.split(";", 2);
-                if (mainParts.length >= 1) {
-                    // 기본 라운드 정보 파싱
-                    String[] roundParts = mainParts[0].split(",");
-                    roundCount = Integer.parseInt(roundParts[0]);
-
-                    // 맵 ID가 포함되어 있으면 새 맵 로드 (별도 스레드에서 처리)
-                    if (roundParts.length > 1) {
-                        String newMapId = roundParts[1];
-                        if (!newMapId.equals(currentMapName)) {
-                            final String mapToLoad = newMapId;
-                            new Thread(() -> {
-                                try {
-                                    System.out.println("[맵] 로딩 시작: " + mapToLoad);
-                                    currentMapName = mapToLoad;
-                                    loadMap(mapToLoad);
-                                    SwingUtilities.invokeLater(() -> {
-                                        appendChatMessage("[맵] " + mapToLoad + " 맵으로 변경되었습니다!");
-                                    });
-                                    System.out.println("[맵] 로딩 완료: " + mapToLoad);
-                                } catch (Exception e) {
-                                    System.err.println("[맵] 로딩 실패: " + e.getMessage());
-                                    e.printStackTrace(System.err);
-                                }
-                            }, "MapLoader-Thread").start();
-                        }
-                    }
-
-                    // ===== 라운드 시작 시 서버에서 받은 모든 플레이어 정보로 완전 초기화 =====
-                    if (mainParts.length > 1) {
-                        String[] playerInfo = mainParts[1].split(";");
-                        int playerCount = Integer.parseInt(playerInfo[0]);
-                        
-                        System.out.println("[ROUND_START] Parsing " + playerCount + " players from server");
-                        
-                        for (int i = 1; i <= playerCount && i < playerInfo.length; i++) {
-                            String[] pData = playerInfo[i].split(",");
-                            if (pData.length >= 4) {
-                                String pName = pData[0];
-                                String pCharId = pData[1];
-                                int pHp = Integer.parseInt(pData[2]);
-                                int pMaxHp = Integer.parseInt(pData[3]);
-
-                                System.out.println("[ROUND_START] Player: " + pName + ", Char: " + pCharId + ", HP: " + pHp + "/" + pMaxHp);
-
-                                if (pName.equals(playerName)) {
-                                    // ===== 내 캐릭터 완전 초기화 =====
-                                    selectedCharacter = pCharId;
-                                    currentCharacterData = com.fpsgame.common.CharacterData.getById(pCharId);
-                                    myHP = pHp;
-                                    myMaxHP = pMaxHp;
-                                    
-                                    // 스프라이트 재로딩
-                                    loadSprites();
-                                    
-                                    // 스킬 재설정
-                                    abilities = CharacterData.createAbilities(selectedCharacter);
-                                    if (abilities != null) {
-                                        for (Ability ability : abilities) {
-                                            if (ability != null) {
-                                                ability.resetCooldown();
-                                            }
-                                        }
-                                    }
-                                    
-                                    System.out.println("[ROUND_START] My character initialized: " + pCharId + " HP: " + myHP + "/" + myMaxHP);
-                                } else {
-                                    // ===== 원격 플레이어 완전 초기화 =====
-                                    PlayerData pd = players.get(pName);
-                                    if (pd != null) {
-                                        pd.characterId = pCharId;
-                                        pd.hp = pHp;
-                                        pd.maxHp = pMaxHp;
-                                        
-                                        // 스프라이트 재로딩
-                                        loadPlayerSprites(pd, pCharId);
-                                        
-                                        System.out.println("[ROUND_START] Remote player updated: " + pName + " -> " + pCharId + " HP: " + pHp + "/" + pMaxHp);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    roundState = RoundState.WAITING;
-                    roundStartTime = System.currentTimeMillis();
-                    centerMessage = "Round " + roundCount + " Ready";
-                    centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
-
-                    // 라운드 시작 시 캐릭터 변경 플래그 초기화
-                    hasChangedCharacterInRound = false;
-
-                    // ===== 스킬 쿨다운 리셋 (라운드 시작 시) =====
-                    if (abilities != null) {
-                        for (Ability ability : abilities) {
-                            if (ability != null) {
-                                ability.resetCooldown();
-                            }
-                        }
-                        System.out.println("[ROUND_START] 모든 스킬 쿨다운 리셋 완료");
-                    }
-
-                    // 라운드 시작 시 오브젝트 및 효과 초기화
-                    placedObjects.clear();
-                    strikeMarkers.clear();
-                    if (effectsByPlayer != null) {
-                        effectsByPlayer.clear();
-                    }
-
-                    // 리스폰
-                    respawn();
-
-                    appendChatMessage("[라운드] Round " + roundCount + " 시작!");
-                }
-                break;
-            }
-
-            case "GAME_OVER": {
-                // GAME_OVER:winningTeamName
-                centerMessage = data + " 팀 최종 승리!";
-                centerMessageEndTime = System.currentTimeMillis() + 5000;
-
-                appendChatMessage("========================================");
-                appendChatMessage("[게임 종료] " + data + " 팀이 최종 승리했습니다!");
-                appendChatMessage("========================================");
-
-                // 5초 후 로비로 복귀
-                javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> {
-                    returnToLobby();
-                });
-                returnTimer.setRepeats(false);
-                returnTimer.start();
-                break;
-            }
-        }
+        messageHandler.handleMessage(message);
     }
 
-    private void disconnect() {
+    /**
+     * 로비로 복귀
+     */
+    void returnToLobby() {
+        // 게임 종료
+        if (timer != null) {
+            timer.stop();
+        }
+        disconnect();
+
+        // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
+        final String currentChar = gameState.getSelectedCharacter(); // ?? ??? ??
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            this.dispose(); // GamePanel? JFrame??? ?? dispose
+
+            GameConfig.saveCharacter("");
+            System.out.println("[??] ? ?? - ??? ???, ??: " + currentChar);
+            LobbyFrame lobby = new LobbyFrame(playerName);
+            lobby.setVisible(true);
+        });
+    }
+
+    void disconnect() {
         try {
             if (timer != null)
                 timer.stop();
@@ -2994,29 +1736,6 @@ public class GamePanel extends JFrame implements KeyListener {
             System.err.println("[ERROR] Failed to close network resources");
             ex.printStackTrace(System.err);
         }
-    }
-
-    /**
-     * 로비로 복귀
-     */
-    private void returnToLobby() {
-        // 게임 종료
-        if (timer != null) {
-            timer.stop();
-        }
-        disconnect();
-
-        // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
-        // ?? ?? ? ???? ????? ?? ????? ??
-        final String currentChar = selectedCharacter; // ?? ??? ??
-        javax.swing.SwingUtilities.invokeLater(() -> {
-            this.dispose(); // GamePanel? JFrame??? ?? dispose
-
-            GameConfig.saveCharacter("");
-            System.out.println("[??] ? ?? - ??? ???, ??: " + currentChar);
-            LobbyFrame lobby = new LobbyFrame(playerName);
-            lobby.setVisible(true);
-        });
     }
 
     @Override
@@ -3230,7 +1949,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 (maxY - minY + 1) * TILE_SIZE);
     }
 
-    private void rebuildObstaclesFromWalkable() {
+    void rebuildObstaclesFromWalkable() {
         obstacles.clear();
         for (int r = 0; r < gridRows; r++) {
             for (int c = 0; c < gridCols; c++) {
@@ -3239,12 +1958,14 @@ public class GamePanel extends JFrame implements KeyListener {
                 }
             }
         }
+        // CollisionManager 업데이트
+        collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
     }
 
     /**
      * 편집된 맵을 JSON 파일로 저장 (assets/maps/<mapName>_edited.json)
      */
-    private void saveEditedMap() {
+    void saveEditedMap() {
         if (walkableGrid == null) {
             appendChatMessage("[에디터] 저장 실패: walkableGrid 없음");
             return;
@@ -3260,7 +1981,7 @@ public class GamePanel extends JFrame implements KeyListener {
             bw.write(generateEditedMapJson());
             bw.flush();
             appendChatMessage("[에디터] 저장 완료: " + outFile.getPath());
-        } catch (Exception ex) {
+        } catch (java.io.IOException ex) {
             appendChatMessage("[에디터] 저장 실패: " + ex.getMessage());
         }
     }
@@ -3359,7 +2080,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 // 스킬별 효과 적용
                 applySkillEffect(tactical);
                 addLocalEffect(tactical);
-                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                if ("raven".equalsIgnoreCase(gameState.getSelectedCharacter())) {
                     ravenDashRemaining = Math.max(ravenDashRemaining, tactical.getActiveDuration());
                 }
             }
@@ -3399,7 +2120,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 // 스킬별 효과 적용
                 applySkillEffect(ultimate);
                 addLocalEffect(ultimate);
-                if ("raven".equalsIgnoreCase(selectedCharacter)) {
+                if ("raven".equalsIgnoreCase(gameState.getSelectedCharacter())) {
                     ravenOverchargeRemaining = ultimate.getActiveDuration();
                     missileSpeedMultiplier = 1.8f;
                     if (abilities != null && abilities.length > 0) {
@@ -3465,7 +2186,7 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     private void applySkillEffect(Ability ability) {
         // Piper: 마킹/열감지 구현 (미니맵 가시성 확장)
-        if ("piper".equalsIgnoreCase(selectedCharacter)) {
+        if ("piper".equalsIgnoreCase(gameState.getSelectedCharacter())) {
             if ("piper_mark".equalsIgnoreCase(ability.id)) {
                 piperMarkRemaining = ability.getActiveDuration();
                 appendChatMessage("[Piper] 적 표시 활성화 (미니맵 시야 확장)");
@@ -3491,20 +2212,15 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     private void sendSkillUse(int skillIndex, String skillType, int targetX, int targetY) {
         if (out != null) {
-            try {
-                // abilityId,type,duration[,x,y]
-                Ability ability = (abilities != null && skillIndex < abilities.length) ? abilities[skillIndex] : null;
-                float dur = (ability != null) ? ability.getActiveDuration() : 0f;
-                String abilityId = (ability != null) ? ability.id : ("skill" + skillIndex);
-                String msg = "SKILL:" + abilityId + "," + skillType + "," + dur;
-                if (targetX >= 0 && targetY >= 0) {
-                    msg += "," + targetX + "," + targetY;
-                }
-                out.writeUTF(msg);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("스킬 전송 실패: " + ex.getMessage());
+            // abilityId,type,duration[,x,y]
+            Ability ability = (abilities != null && skillIndex < abilities.length) ? abilities[skillIndex] : null;
+            float dur = (ability != null) ? ability.getActiveDuration() : 0f;
+            String abilityId = (ability != null) ? ability.id : ("skill" + skillIndex);
+            String msg = abilityId + "," + skillType + "," + dur;
+            if (targetX >= 0 && targetY >= 0) {
+                msg += "," + targetX + "," + targetY;
             }
+            networkClient.sendSkillUse(msg);
         }
     }
 
@@ -3515,26 +2231,29 @@ public class GamePanel extends JFrame implements KeyListener {
         roundStartTime = System.currentTimeMillis();
         centerMessage = "Round " + roundCount + " Ready";
         centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+        
+        // 라운드 시작 시 캐릭터 변경 플래그 초기화
+        hasChangedCharacterInRound = false;
 
         // Map rotation is handled by the server's ROUND_START message; do not switch locally.
 
         respawn(); // 전원 리스폰 위치로
     }
 
-    private void openCharacterSelect() {
-        // 1. 라운드 상태 체크 - WAITING 상태가 아니면 변경 불가
-        if (roundState != RoundState.WAITING) {
-            appendChatMessage("[시스템] 라운드 진행 중에는 캐릭터를 변경할 수 없습니다.");
-            return;
-        }
-
-        // 2. 시간 제한 체크 (10초) - 더 엄격하게
+    void openCharacterSelect() {
+        // 1. 시간 제한 체크 (10초) - 최우선으로 체크
         long now = System.currentTimeMillis();
         long elapsed = now - roundStartTime;
         long remaining = CHARACTER_CHANGE_TIME_LIMIT - elapsed;
         
         if (elapsed >= CHARACTER_CHANGE_TIME_LIMIT) {
             appendChatMessage("[시스템] 캐릭터 변경 가능 시간이 만료되었습니다. (경과: " + (elapsed/1000) + "초)");
+            return;
+        }
+        
+        // 2. 라운드 상태 체크 - WAITING 상태가 아니면 변경 불가
+        if (roundState != RoundState.WAITING) {
+            appendChatMessage("[시스템] 라운드 진행 중에는 캐릭터를 변경할 수 없습니다.");
             return;
         }
         
@@ -3560,41 +2279,49 @@ public class GamePanel extends JFrame implements KeyListener {
             }
         }
         // 내 현재 캐릭터는 비활성화 목록에서 제거해 재선택 가능하게 유지
-        if (selectedCharacter != null) {
-            disabledCharacters.remove(selectedCharacter);
-            characterOwners.remove(selectedCharacter);
+        String currentChar = gameState.getSelectedCharacter();
+        if (currentChar != null) {
+            disabledCharacters.remove(currentChar);
+            characterOwners.remove(currentChar);
         }
 
         // 캐릭터 선택 다이얼로그 표시 (남은 시간 지나면 자동 닫힘)
         String newCharacter = CharacterSelectDialog.showDialog(this, disabledCharacters, characterOwners, remaining);
 
         if (newCharacter != null) {
-            selectedCharacter = newCharacter;
-            currentCharacterData = CharacterData.getById(selectedCharacter);
+            // 다이얼로그가 닫힌 후 최종 시간 체크 (사용자가 대기하다가 시간 초과 후 선택한 경우 방지)
+            long finalElapsed = System.currentTimeMillis() - roundStartTime;
+            if (finalElapsed >= CHARACTER_CHANGE_TIME_LIMIT) {
+                appendChatMessage("[시스템] 시간이 초과되어 캐릭터 변경이 취소되었습니다.");
+                if (timer != null) {
+                    timer.start();
+                }
+                return;
+            }
+            
+            // GameState에 새 캐릭터 설정
+            gameState.setSelectedCharacter(newCharacter);
+            CharacterData newCharData = CharacterData.getById(newCharacter);
+            gameState.setCurrentCharacterData(newCharData);
 
-            // 스킬 재로드
-            abilities = CharacterData.createAbilities(selectedCharacter);
-            myMaxHP = (int) currentCharacterData.health;
-            myHP = myMaxHP;
+            // 스킬 재로드 (로컬 유지)
+            abilities = CharacterData.createAbilities(newCharacter);
+            gameState.setAbilities(abilities);
+            
+            int newMaxHp = (int) newCharData.health;
+            gameState.setMyMaxHP(newMaxHp);
+            gameState.setMyHP(newMaxHp);
             
             // 변경 플래그 설정 (서버 응답 전에 먼저 설정하여 중복 요청 방지)
             hasChangedCharacterInRound = true;
 
             // 서버에 캐릭터 변경 알림
             if (out != null) {
-                try {
-                    out.writeUTF("CHARACTER_SELECT:" + selectedCharacter);
-                    out.flush();
-                    System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
-                } catch (IOException ex) {
-                    System.err.println("[ERROR] Failed to send CHARACTER_SELECT message");
-                    ex.printStackTrace(System.err);
-                    // 실패 시 플래그 되돌림
-                    hasChangedCharacterInRound = false;
-                }
+                networkClient.sendCharacterSelect(newCharacter);
+                System.out.println("[Client] Character change request sent: " + newCharacter + " at " + elapsed + "ms");
             }
 
-            appendChatMessage("캐릭터를 " + currentCharacterData.name + "으로 변경했습니다.");
+            appendChatMessage("캐릭터를 " + newCharData.name + "으로 변경했습니다.");
 
             // 스프라이트 재로드
             loadSprites();
@@ -3618,15 +2345,16 @@ public class GamePanel extends JFrame implements KeyListener {
     public void keyTyped(KeyEvent e) {
     }
 
-    private void loadSprites() {
+    void loadSprites() {
         try {
             ResourceManager rm = ResourceManager.getInstance();
             myAnimations = new SpriteAnimation[4];
 
             // 캐릭터별 스프라이트 시트 경로 결정
             String spritePath = "assets/characters/";
-            if (selectedCharacter != null) {
-                switch (selectedCharacter.toLowerCase()) {
+            String charId = gameState.getSelectedCharacter();
+            if (charId != null) {
+                switch (charId.toLowerCase()) {
                     case "raven":
                         spritePath += "Raven_48_64.png";
                         break;
@@ -3680,7 +2408,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 myAnimations[2] = new SpriteAnimation(leftFrames, 150, true); // Left
                 myAnimations[3] = new SpriteAnimation(rightFrames, 150, true); // Right
 
-                System.out.println("[SPRITE] Walk animations created for " + selectedCharacter);
+                System.out.println("[SPRITE] Walk animations created for " + charId);
             } else {
                 System.out.println("[ERROR] Walk sheet invalid!");
             }
@@ -3698,7 +2426,7 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * 원격 플레이어의 스프라이트를 로드합니다
      */
-    private void loadPlayerSprites(PlayerData player, String characterId) {
+    void loadPlayerSprites(PlayerData player, String characterId) {
         try {
             System.out.println("[SPRITE] 시작: " + characterId + " 스프라이트 로딩...");
             

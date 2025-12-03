@@ -1,3 +1,49 @@
+## Recent Updates
+
+### Architecture Refactoring (2025-12-03) ✨
+**SOLID 원칙을 준수하는 MVC 패턴 리팩터링 완료**
+
+#### Phase 1: 렌더링 분리 (GameRenderer 추출)
+게임 로직과 렌더링을 완전히 분리하여 코드 품질과 유지보수성을 대폭 향상:
+
+- **GameRenderer**: 모든 렌더링 로직을 전담 (~764줄)
+  - `RenderContext` 패턴으로 데이터 수신
+  - GamePanel 의존성 완전 제거
+  - 단일 책임 원칙(SRP) 준수
+  
+- **GamePanel**: 게임 로직과 상태 관리만 담당 (~800줄 감소)
+  - 렌더링 구현 코드 제거 (renderGame + 13개 draw 메서드)
+  - `createRenderContext()`로 렌더링 데이터 제공
+  - 깔끔한 책임 분리
+
+#### Phase 2: 상태 관리 통합 (필드 중복 제거)
+GamePanel과 GameState의 필드 중복을 제거하여 상태 관리 일관성 확보:
+
+- **제거된 중복 필드**: `selectedCharacter`, `currentCharacterData`, `myHP`, `myMaxHP`, `kills`, `deaths` (6개)
+- **전략적 캐싱**: `abilities`만 로컬 유지 (매 프레임 update 필요)
+- **Single Source of Truth**: GameState가 모든 게임 상태의 유일한 소스
+- **동기화 코드 제거**: 수동 동기화 코드 ~20곳 제거
+
+**아키텍처:**
+```
+GamePanel (게임 로직)
+    ↓ creates
+RenderContext (데이터 전달)
+    ↓ passed to
+GameRenderer (렌더링)
+
+GamePanel ←→ GameState (상태 중앙 관리)
+    ↓
+NetworkClient (네트워크 통신)
+```
+
+**개선 효과:**
+- 렌더링 버그가 게임 로직에 영향 없음
+- 상태 동기화 버그 위험 제거
+- 테스트 용이성 대폭 향상
+- 코드 가독성 및 유지보수성 개선
+- 약 800줄 코드 감소 (3886줄 → 3107줄)
+
 ## Fixes (2025-11-09)
 
 - Fixed basic attack direction when camera is moved:

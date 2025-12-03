@@ -138,7 +138,7 @@ public class MainLauncher extends JFrame {
     public static void main(String[] args) {
         // 시스템 Look and Feel 적용
         try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
         } catch (Exception e) {
             System.err.println("[MainLauncher] Failed to set Look and Feel");
             e.printStackTrace(System.err);
