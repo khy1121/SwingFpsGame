@@ -34,6 +34,17 @@ public class GameRenderer {
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
+        // 고정 해상도 렌더링 + 스케일링
+        // 실제 캔버스 크기가 달라져도 항상 1280x720 영역만 보이도록
+        double scaleX = (double) ctx.actualCanvasWidth / GameConstants.GAME_WIDTH;
+        double scaleY = (double) ctx.actualCanvasHeight / GameConstants.GAME_HEIGHT;
+        
+        // 스케일 적용
+        g2d.scale(scaleX, scaleY);
+        
+        // 이후 모든 렌더링은 1280x720 좌표계에서 진행
+        // ctx.canvasWidth와 canvasHeight는 항상 고정값 사용
+        
         // 1. 맵 배경
         drawMap(g2d, ctx);
         
@@ -615,6 +626,7 @@ public class GameRenderer {
         g.setColor(Color.WHITE);
         g.drawString("Round " + ctx.roundCount, centerX - 30, 55);
         
+        // WAITING 상태면 10초 카운트 표시
         if (ctx.roundState == GamePanel.RoundState.WAITING) {
             long remaining = Math.max(0, GamePanel.ROUND_READY_TIME - (System.currentTimeMillis() - ctx.roundStartTime));
             int sec = (int) (remaining / 1000) + 1;
@@ -622,7 +634,9 @@ public class GameRenderer {
                 drawCenterText(g, "라운드 시작까지 " + sec + "초", 40, Color.YELLOW, ctx);
                 drawCenterText(g, "캐릭터를 변경할 수 있습니다 (B키)", 20, Color.WHITE, 50, ctx);
             }
-        } else if (!ctx.centerMessage.isEmpty() && System.currentTimeMillis() < ctx.centerMessageEndTime) {
+        }
+        // WAITING이 아닌 경우에만 중앙 메시지 표시 (ROUND_WIN, GAME_OVER 등)
+        else if (!ctx.centerMessage.isEmpty() && System.currentTimeMillis() < ctx.centerMessageEndTime) {
             drawCenterText(g, ctx.centerMessage, 40, Color.YELLOW, ctx);
         }
     }
@@ -751,8 +765,10 @@ public class GameRenderer {
         public float teamThermalRemaining;
         
         // 캔버스 크기
-        public int canvasWidth;
-        public int canvasHeight;
+        public int canvasWidth;  // 고정 렌더링 크기 (1280x720)
+        public int canvasHeight; // 고정 렌더링 크기 (1280x720)
+        public int actualCanvasWidth;  // 실제 윈도우 크기
+        public int actualCanvasHeight; // 실제 윈도우 크기
         
         // 편집 모드 데이터
         public boolean[][] walkableGrid;

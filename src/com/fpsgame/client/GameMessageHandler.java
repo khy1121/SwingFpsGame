@@ -30,22 +30,30 @@ public class GameMessageHandler {
         String data = parts[1];
         
         switch (command) {
+            case "WELCOME" -> handleWelcome(data);
+            case "TEAM_ROSTER" -> handleTeamRoster(data);
             case "CHAT" -> handleChat(data);
             case "CHARACTER_SELECT" -> handleCharacterSelect(data);
             case "PLAYER" -> handlePlayer(data);
             case "REMOVE" -> handleRemove(data);
             case "KILL" -> handleKill(data);
             case "STATS" -> handleStats(data);
+            case "SHOOT" -> handleShoot(data);
             case "SKILL" -> handleSkill(data);
             case "MISSILE" -> handleMissile(data);
             case "HIT" -> handleHit(data);
-            case "OBJ" -> handleObject(data);
+            case "PLACE" -> handleObject(data);
             case "OBJ_DESTROY" -> handleObjectDestroy(data);
+            case "OBJ_UPDATE" -> handleObjectUpdate(data);
             case "BUFF" -> handleBuff(data);
-            case "STRIKE" -> handleStrike(data);
+            case "UNBUFF" -> handleUnbuff(data);
+            case "STRIKE_MARK" -> handleStrike(data);
+            case "STRIKE_IMPACT" -> handleStrikeImpact(data);
             case "TURRET_SHOOT" -> handleTurretShoot(data);
+            case "ROUND_WIN" -> handleRoundWin(data);
             case "ROUND_END" -> handleRoundEnd(data);
             case "ROUND_START" -> handleRoundStart(data);
+            case "GAME_OVER" -> handleGameOver(data);
             case "GAME_END" -> handleGameEnd(data);
             default -> System.out.println("[알 수 없는 명령어] " + command);
         }
@@ -53,6 +61,32 @@ public class GameMessageHandler {
     
     private void handleChat(String data) {
         gamePanel.appendChatMessage(data);
+    }
+    
+    private void handleWelcome(String data) {
+        gamePanel.appendChatMessage("[시스템] " + data);
+        System.out.println("[WELCOME] " + data);
+    }
+    
+    private void handleTeamRoster(String data) {
+        // 형식: RED,name1,name2;BLUE,name3,name4
+        String[] teams = data.split(";");
+        StringBuilder roster = new StringBuilder("[팀 구성]\n");
+        
+        for (String team : teams) {
+            String[] parts = team.split(",");
+            if (parts.length > 0) {
+                String teamName = parts[0];
+                roster.append(teamName).append(" 팀: ");
+                for (int i = 1; i < parts.length; i++) {
+                    if (i > 1) roster.append(", ");
+                    roster.append(parts[i]);
+                }
+                roster.append("\n");
+            }
+        }
+        gamePanel.appendChatMessage(roster.toString().trim());
+        System.out.println("[TEAM_ROSTER] " + data);
     }
     
     private void handleCharacterSelect(String data) {
@@ -214,6 +248,25 @@ public class GameMessageHandler {
         }
     }
     
+    private void handleShoot(String data) {
+        // 형식: playerName,sx,sy,dx,dy
+        String[] shootData = data.split(",");
+        if (shootData.length < 5) return;
+        
+        String shooter = shootData[0];
+        int sx = Integer.parseInt(shootData[1]);
+        int sy = Integer.parseInt(shootData[2]);
+        int dx = Integer.parseInt(shootData[3]);
+        int dy = Integer.parseInt(shootData[4]);
+        
+        // 다른 플레이어의 발사 시각 효과 (총구 섬광)
+        if (!shooter.equals(gamePanel.playerName)) {
+            double angle = Math.atan2(dy - sy, dx - sx);
+            gamePanel.skillEffects.addForPlayer(shooter, new MuzzleFlashEffect(angle));
+            System.out.println("[SHOOT] " + shooter + " fired from (" + sx + "," + sy + ") to (" + dx + "," + dy + ")");
+        }
+    }
+    
     private void handleSkill(String data) {
         // SKILL:user,abilityId,type,duration 형식
         String[] sd = data.split(",");
@@ -318,6 +371,35 @@ public class GameMessageHandler {
         }
     }
     
+    private void handleUnbuff(String data) {
+        // 형식: abilityId
+        if (data.equals("gen_aura")) {
+            gamePanel.moveSpeedMultiplier = 1.0f;
+            gamePanel.attackSpeedMultiplier = 1.0f;
+            gamePanel.appendChatMessage("[버프] 장군의 오라 효과 종료");
+            System.out.println("[UNBUFF] Aura buff removed");
+        }
+    }
+    
+    private void handleObjectUpdate(String data) {
+        // 형식: objId,hp
+        String[] objData = data.split(",");
+        if (objData.length < 2) return;
+        
+        try {
+            int objId = Integer.parseInt(objData[0]);
+            int hp = Integer.parseInt(objData[1]);
+            
+            GamePanel.PlacedObjectClient obj = gamePanel.placedObjects.get(objId);
+            if (obj != null) {
+                obj.hp = hp;
+                System.out.println("[OBJ_UPDATE] Object " + objId + " HP: " + hp);
+            }
+        } catch (NumberFormatException e) {
+            System.err.println("[OBJ_UPDATE] Invalid data: " + data);
+        }
+    }
+    
     private void handleStrike(String data) {
         String[] strikeData = data.split(",");
         if (strikeData.length >= 3) {
@@ -329,12 +411,31 @@ public class GameMessageHandler {
         }
     }
     
+    private void handleStrikeImpact(String data) {
+        String[] impactData = data.split(",");
+        if (impactData.length >= 4) {
+            int strikeId = Integer.parseInt(impactData[0]);
+            int sx = Integer.parseInt(impactData[1]);
+            int sy = Integer.parseInt(impactData[2]);
+            int radius = Integer.parseInt(impactData[3]);
+            
+            // 마커 제거
+            gamePanel.strikeMarkers.remove(strikeId);
+            gamePanel.appendChatMessage("[에어스트라이크] 임팩트! (" + sx + ", " + sy + ")");
+            
+            // TODO: 폭발 애니메이션 효과 추가
+        }
+    }
+    
     private void handleTurretShoot(String data) {
+        // 형식: turretId,tx,ty,targetName,ownerName
         String[] ts = data.split(",");
-        if (ts.length >= 4) {
+        if (ts.length >= 5) {
             int turretId = Integer.parseInt(ts[0]);
             int tx = Integer.parseInt(ts[1]);
             int ty = Integer.parseInt(ts[2]);
+            String targetName = ts[3];
+            String ownerName = ts[4];
             
             GamePanel.PlacedObjectClient turret = gamePanel.placedObjects.get(turretId);
             if (turret != null) {
@@ -347,8 +448,11 @@ public class GameMessageHandler {
                     int speed = 8;
                     int missileVx = (int) (dx / distance * speed);
                     int missileVy = (int) (dy / distance * speed);
+                    // 터렛 미사일은 TURRET: 접두사로 소유자 표시
                     gamePanel.missiles.add(gamePanel.new Missile(sx, sy, missileVx, missileVy, 
-                        gamePanel.team, turret.owner));
+                        turret.team, "TURRET:" + ownerName));
+                    System.out.println("[TURRET_SHOOT] Turret #" + turretId + " (owner: " + ownerName + 
+                        ") fired at " + targetName + " (" + tx + ", " + ty + ")");
                 }
             }
         }
@@ -361,9 +465,41 @@ public class GameMessageHandler {
             gamePanel.redWins = Integer.parseInt(rd[1]);
             gamePanel.blueWins = Integer.parseInt(rd[2]);
             gamePanel.roundState = GamePanel.RoundState.ENDED;
-            gamePanel.appendChatMessage("[라운드] " + winTeam + " 팀 승리! (점수: " + 
+            
+            String winTeamName = winTeam.equals("RED") ? "레드" : "블루";
+            // 중앙 메시지 표시
+            gamePanel.centerMessage = "Round End - " + winTeamName + " Win";
+            gamePanel.centerMessageEndTime = System.currentTimeMillis() + 3000; // 3초간 표시
+            
+            gamePanel.appendChatMessage("[라운드] " + winTeamName + " 팀 승리! (점수: " + 
                 gamePanel.redWins + " : " + gamePanel.blueWins + ")");
         }
+    }
+    
+    private void handleRoundWin(String data) {
+        // 형식: winningTeam,redWins,blueWins
+        String[] winData = data.split(",");
+        if (winData.length < 3) return;
+        
+        String winner = winData[0];
+        int redWins = Integer.parseInt(winData[1]);
+        int blueWins = Integer.parseInt(winData[2]);
+        
+        gamePanel.redWins = redWins;
+        gamePanel.blueWins = blueWins;
+        
+        // 팀 ID 처리: "0" = RED, "1" = BLUE (GameConstants 참조)
+        String winTeamName = winner.equals("0") ? "레드" : "블루";
+        
+        // 중앙 메시지 표시
+        gamePanel.centerMessage = winTeamName + " 팀 승리!";
+        gamePanel.centerMessageEndTime = System.currentTimeMillis() + 5000; // 5초간 표시
+        
+        gamePanel.appendChatMessage("========================================");
+        gamePanel.appendChatMessage("[라운드 승리] " + winTeamName + " 팀 승리!");
+        gamePanel.appendChatMessage("현재 스코어 - RED: " + redWins + " | BLUE: " + blueWins);
+        gamePanel.appendChatMessage("========================================");
+        System.out.println("[ROUND_WIN] " + winner + " team wins! Score: R=" + redWins + ", B=" + blueWins);
     }
     
     private void handleRoundStart(String data) {
@@ -387,29 +523,41 @@ public class GameMessageHandler {
         // 라운드 시작
         gamePanel.roundState = GamePanel.RoundState.WAITING;
         gamePanel.roundStartTime = System.currentTimeMillis();
-        gamePanel.centerMessage = "Round " + gamePanel.roundCount + " Ready";
-        gamePanel.centerMessageEndTime = gamePanel.roundStartTime + GamePanel.ROUND_READY_TIME;
+        gamePanel.centerMessage = "";
+        gamePanel.centerMessageEndTime = 0;
         gamePanel.hasChangedCharacterInRound = false;
         
         gamePanel.appendChatMessage("[라운드 " + gamePanel.roundCount + "] 10초 후 시작!");
     }
     
     private void handleMapChange(String newMapId) {
+        // 맵이 변경되었거나 처음 로드하는 경우에만 로드
+        if (newMapId == null || newMapId.trim().isEmpty()) {
+            System.err.println("[ERROR] handleMapChange: newMapId is null or empty");
+            return;
+        }
+        
+        // 다른 맵인 경우에만 로드 (중복 방지)
         if (!newMapId.equals(gamePanel.currentMapName)) {
+            final String mapToLoad = newMapId;
+            System.out.println("[맵 변경] " + gamePanel.currentMapName + " → " + mapToLoad);
+            
             new Thread(() -> {
                 try {
-                    System.out.println("[맵] 로딩 시작: " + newMapId);
-                    gamePanel.currentMapName = newMapId;
-                    gamePanel.loadMap(newMapId);
+                    System.out.println("[맵] 로딩 시작: " + mapToLoad);
+                    gamePanel.currentMapName = mapToLoad;
+                    gamePanel.loadMap(mapToLoad);
                     javax.swing.SwingUtilities.invokeLater(() -> {
-                        gamePanel.appendChatMessage("[맵] " + newMapId + " 맵으로 변경되었습니다!");
+                        gamePanel.appendChatMessage("[맵] " + mapToLoad + " 맵으로 변경되었습니다!");
                     });
-                    System.out.println("[맵] 로딩 완료: " + newMapId);
+                    System.out.println("[맵] 로딩 완료: " + mapToLoad);
                 } catch (Exception e) {
                     System.err.println("[맵] 로딩 실패: " + e.getMessage());
                     e.printStackTrace(System.err);
                 }
             }, "MapLoader-Thread").start();
+        } else {
+            System.out.println("[맵] 이미 로드됨: " + newMapId + " (중복 로드 방지)");
         }
     }
     
@@ -520,9 +668,33 @@ public class GameMessageHandler {
         }
     }
     
-    private void handleGameEnd(String data) {
+    private void handleGameOver(String data) {
+        // 형식: winningTeamName
+        String winTeamName = data.equals("RED") ? "레드" : (data.equals("BLUE") ? "블루" : data);
+        
+        // 중앙 메시지 표시
+        gamePanel.centerMessage = winTeamName + " 팀 최종 승리!";
+        gamePanel.centerMessageEndTime = System.currentTimeMillis() + 5000; // 5초간 표시
+        
         gamePanel.appendChatMessage("========================================");
-        gamePanel.appendChatMessage("[게임 종료] " + data + " 팀이 최종 승리했습니다!");
+        gamePanel.appendChatMessage("[게임 종료] " + winTeamName + " 팀이 최종 승리했습니다!");
+        gamePanel.appendChatMessage("========================================");
+        System.out.println("[GAME_OVER] Final winner: " + data);
+        
+        javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> gamePanel.returnToLobby());
+        returnTimer.setRepeats(false);
+        returnTimer.start();
+    }
+    
+    private void handleGameEnd(String data) {
+        String winTeamName = data.equals("RED") ? "레드" : (data.equals("BLUE") ? "블루" : data);
+        
+        // 중앙 메시지 표시
+        gamePanel.centerMessage = "Game Over - " + winTeamName + " Win!";
+        gamePanel.centerMessageEndTime = System.currentTimeMillis() + 5000; // 5초간 표시
+        
+        gamePanel.appendChatMessage("========================================");
+        gamePanel.appendChatMessage("[게임 종료] " + winTeamName + " 팀이 최종 승리했습니다!");
         gamePanel.appendChatMessage("========================================");
         
         javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> gamePanel.returnToLobby());

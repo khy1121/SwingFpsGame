@@ -123,7 +123,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private int mapHeight = 2400; // 화면의 4배
     private int cameraX = 0; // 카메라 위치 (플레이어 중심)
     private int cameraY = 0;
-    String currentMapName = "map"; // 기본 맵 (map.png 사용)
+    String currentMapName = "map"; // 기본 맵 (서버가 ROUND_START에서 변경 가능)
     // 타일 그리드
     private static final int TILE_SIZE = 32;
     private boolean[][] walkableGrid; // true = 이동 가능
@@ -274,7 +274,9 @@ public class GamePanel extends JFrame implements KeyListener {
 
     class GameCanvas extends JPanel {
         public GameCanvas() {
-            setPreferredSize(new Dimension(GameConstants.GAME_WIDTH, GameConstants.GAME_HEIGHT));
+            // 초기 크기: 1150x800 (채팅 패널 250px 제외)
+            // 스케일링으로 1280x720 영역만 보임
+            setPreferredSize(new Dimension(1150, 800));
             setBackground(new Color(20, 25, 35));
             setFocusable(true);
             addKeyListener(GamePanel.this);
@@ -286,21 +288,27 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
+                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
+                    int scaledMouseX = (int) (e.getX() / scaleX);
+                    int scaledMouseY = (int) (e.getY() / scaleY);
+                    
                     // 미니맵 타겟팅 모드: General 에어스트라이크
                     if (awaitingMinimapTarget && e.getButton() == MouseEvent.BUTTON1) {
-                        // 미니맵 영역 체크
+                        // 미니맵 영역 체크 (고정 해상도 기준)
                         int minimapWidth = 200;
                         int minimapHeight = 150;
-                        int minimapX = getWidth() - minimapWidth - 20;
+                        int minimapX = GameConstants.GAME_WIDTH - minimapWidth - 20;
                         int minimapY = 20;
 
-                        if (e.getX() >= minimapX && e.getX() <= minimapX + minimapWidth &&
-                                e.getY() >= minimapY && e.getY() <= minimapY + minimapHeight) {
+                        if (scaledMouseX >= minimapX && scaledMouseX <= minimapX + minimapWidth &&
+                                scaledMouseY >= minimapY && scaledMouseY <= minimapY + minimapHeight) {
                             // 미니맵 좌표를 맵 좌표로 변환
-                            float scaleX = (float) minimapWidth / mapWidth;
-                            float scaleY = (float) minimapHeight / mapHeight;
-                            int targetMapX = (int) ((e.getX() - minimapX) / scaleX);
-                            int targetMapY = (int) ((e.getY() - minimapY) / scaleY);
+                            float mapScaleX = (float) minimapWidth / mapWidth;
+                            float mapScaleY = (float) minimapHeight / mapHeight;
+                            int targetMapX = (int) ((scaledMouseX - minimapX) / mapScaleX);
+                            int targetMapY = (int) ((scaledMouseY - minimapY) / mapScaleY);
 
                             // 에어스트라이크 전송
                             sendSkillUse(2, "ULTIMATE", targetMapX, targetMapY);
@@ -317,15 +325,15 @@ public class GamePanel extends JFrame implements KeyListener {
 
                     // 편집 모드: 타일 페인팅
                     if (editMode) {
-                        int mapX = e.getX() + cameraX;
-                        int mapY = e.getY() + cameraY;
+                        int mapX = scaledMouseX + cameraX;
+                        int mapY = scaledMouseY + cameraY;
                         startPaintAt(mapX, mapY);
                         return;
                     }
                     // 게임 모드: 좌클릭 공격
                     if (e.getButton() == MouseEvent.BUTTON1) {
-                        int targetMapX = e.getX() + cameraX;
-                        int targetMapY = e.getY() + cameraY;
+                        int targetMapX = scaledMouseX + cameraX;
+                        int targetMapY = scaledMouseY + cameraY;
                         useBasicAttack(targetMapX, targetMapY);
                     }
                 }
@@ -342,16 +350,22 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseMotionListener(new MouseMotionAdapter() {
                 @Override
                 public void mouseMoved(MouseEvent e) {
-                    mouseX = e.getX();
-                    mouseY = e.getY();
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
+                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
+                    mouseX = (int) (e.getX() / scaleX);
+                    mouseY = (int) (e.getY() / scaleY);
                     if (editMode)
                         updateHoverTile(mouseX + cameraX, mouseY + cameraY);
                 }
 
                 @Override
                 public void mouseDragged(MouseEvent e) {
-                    mouseX = e.getX();
-                    mouseY = e.getY();
+                    // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
+                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
+                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
+                    mouseX = (int) (e.getX() / scaleX);
+                    mouseY = (int) (e.getY() / scaleY);
                     if (editMode) {
                         int mapX = mouseX + cameraX;
                         int mapY = mouseY + cameraY;
@@ -432,9 +446,11 @@ public class GamePanel extends JFrame implements KeyListener {
         ctx.teamMarkRemaining = this.teamMarkRemaining;
         ctx.teamThermalRemaining = this.teamThermalRemaining;
         
-        // 캔버스 크기
-        ctx.canvasWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
-        ctx.canvasHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        // 캔버스 크기 - 고정 렌더링 크기와 실제 크기 분리
+        ctx.canvasWidth = GameConstants.GAME_WIDTH;   // 항상 1280 (고정)
+        ctx.canvasHeight = GameConstants.GAME_HEIGHT; // 항상 720 (고정)
+        ctx.actualCanvasWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        ctx.actualCanvasHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
         
         // 에디터
         ctx.walkableGrid = this.walkableGrid;
@@ -487,7 +503,7 @@ public class GamePanel extends JFrame implements KeyListener {
         this.abilities = CharacterData.createAbilities(selectedChar);
         gameState.setAbilities(this.abilities);
 
-        // 기본 맵 로드 (ROUND_START에서 다른 맵으로 변경될 수 있음)
+        // 기본 맵 로드 (서버 ROUND_START에서 다른 맵으로 변경 가능)
         loadMap(currentMapName);
 
         // 플레이어 초기 위치 (팀별 스폰 지역)
@@ -536,7 +552,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 채팅 패널 (오른쪽)
         JPanel chatPanel = new JPanel(new BorderLayout());
-        chatPanel.setPreferredSize(new Dimension(250, GameConstants.GAME_HEIGHT));
+        chatPanel.setPreferredSize(new Dimension(250, 800)); // 창 높이에 맞춤
         chatPanel.setBackground(new Color(32, 34, 37));
 
         // 채팅 영역
@@ -1567,7 +1583,7 @@ public class GamePanel extends JFrame implements KeyListener {
         Iterator<Missile> it = missiles.iterator();
         while (it.hasNext()) {
             Missile m = it.next();
-            if (m.team == team) {
+            if (m.team == team && m.owner != null && m.owner.equals(playerName)) {
                 // 적 플레이어와 충돌 체크
                 boolean hit = false;
                 for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
@@ -1577,6 +1593,10 @@ public class GamePanel extends JFrame implements KeyListener {
                         if (dist < 20) {
                             it.remove();
                             hit = true;
+                            // 서버에 적 플레이어 피격 보고
+                            String targetName = entry.getKey();
+                            networkClient.sendHitReport("HIT:" + targetName);
+                            System.out.println("[HIT] My missile hit " + targetName);
                             break;
                         }
                     }
@@ -1592,6 +1612,7 @@ public class GamePanel extends JFrame implements KeyListener {
                                 it.remove();
                                 // 서버에 오브젝트 피격 보고
                                 networkClient.sendHitReport("HIT_OBJ:" + obj.id);
+                                System.out.println("[HIT_OBJ] My missile hit object " + obj.id);
                                 break;
                             }
                         }
@@ -1609,7 +1630,17 @@ public class GamePanel extends JFrame implements KeyListener {
                 if (dist < 20) {
                     enemyIt.remove();
                     if (m.owner != null) {
-                        networkClient.sendHitReport("HITME:" + m.owner);
+                        // 터렛 미사일인 경우 TURRET: 접두사가 이미 포함되어 있음
+                        String ownerInfo = m.owner;
+                        // 자기 자신의 터렛에 맞지 않도록 체크
+                        if (ownerInfo.startsWith("TURRET:")) {
+                            String turretOwner = ownerInfo.substring(7);
+                            if (turretOwner.equals(playerName)) {
+                                System.out.println("[DEBUG] Ignored own turret missile hit");
+                                continue; // 자기 터렛 미사일은 무시
+                            }
+                        }
+                        networkClient.sendHitReport("HITME:" + ownerInfo);
                     } else {
                         networkClient.sendHitReport("DEATH");
                     }
