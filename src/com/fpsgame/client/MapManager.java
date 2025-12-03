@@ -44,7 +44,7 @@ public class MapManager {
     private int editPaintMode = 0;
     
     // 채팅 콜백 (메시지 출력용)
-    private MessageCallback messageCallback;
+    private final MessageCallback messageCallback;
     
     @FunctionalInterface
     public interface MessageCallback {

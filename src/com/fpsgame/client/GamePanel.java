@@ -17,6 +17,7 @@ import javax.swing.*;
  * 예제 코드처럼 단순한 게임 화면
  * 
  * 리팩토링: GameState, NetworkClient, GameRenderer 사용하여 책임 분리
+ * Phase 2: MapManager, SkillManager, UIManager, GameLogicController 추가
  */
 public class GamePanel extends JFrame implements KeyListener {
 
@@ -35,6 +36,12 @@ public class GamePanel extends JFrame implements KeyListener {
     
     // 메시지 처리 관리 (리팩토링)
     private final GameMessageHandler messageHandler;
+    
+    // Phase 2: MVC 패턴 매니저들
+    private final MapManager mapManager;
+    private final SkillManager skillManager;
+    private final UIManager uiManager;
+    private final GameLogicController gameLogicController;
 
     // Backward compatibility - keep fields but sync with gameState
     final String playerName;
@@ -475,6 +482,14 @@ public class GamePanel extends JFrame implements KeyListener {
         
         // GameMessageHandler 초기화
         this.messageHandler = new GameMessageHandler(this);
+        
+        // Phase 2: 매니저 초기화
+        this.mapManager = new MapManager(this::appendChatMessage);
+        this.uiManager = new UIManager(
+            msg -> { /* TODO: 채팅 전송 로직 */ },  // ChatSendCallback
+            action -> { /* TODO: 메뉴 액션 처리 */ }  // MenuActionCallback
+        );
+        this.gameLogicController = new GameLogicController(this::appendChatMessage);
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
@@ -492,6 +507,9 @@ public class GamePanel extends JFrame implements KeyListener {
         // 스킬 초기화 (로컬 유지 - 매 프레임 update)
         this.abilities = CharacterData.createAbilities(selectedChar);
         gameState.setAbilities(this.abilities);
+        
+        // SkillManager 초기화 (abilities 필요)
+        this.skillManager = new SkillManager(this.abilities, this::appendChatMessage);
 
         // 기본 맵 로드 (서버 ROUND_START에서 다른 맵으로 변경 가능)
         loadMap(currentMapName);
