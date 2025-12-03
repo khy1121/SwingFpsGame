@@ -5,225 +5,97 @@ import com.fpsgame.common.Ability;
 import com.fpsgame.common.CharacterData;
 import com.fpsgame.common.GameConstants;
 import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.util.*;
 import java.util.List;
-import javax.swing.JPanel;
+import java.util.Map;
 
 /**
- * GameRenderer - 게임 렌더링 전담 클래스
- * GamePanel에서 분리하여 모든 그리기 로직을 관리
+ * GameRenderer - 게임 렌더링 전담
+ * 
+ * SOLID 원칙 준수:
+ * - Single Responsibility: 렌더링만 담당
+ * - GamePanel로부터 완전히 분리된 렌더링 로직
+ * - 필요한 데이터를 RenderContext로 받아 렌더링
  */
 public class GameRenderer {
     
-    private static final int TILE_SIZE = 32;
-    private static final int VISION_RANGE = (int) (Math.sqrt(
-            GameConstants.GAME_WIDTH * GameConstants.GAME_WIDTH +
-                    GameConstants.GAME_HEIGHT * GameConstants.GAME_HEIGHT)
-            / 2);
-    private static final float PIPER_MARK_RANGE_FACTOR = 1.7f;
+    // 렌더링 상수
+    private static final int VISION_RANGE = 800;
+    private static final float PIPER_MARK_RANGE_FACTOR = 1.5f;
     private static final int PIPER_THERMAL_DOT_SIZE = 10;
     
-    // 렌더링에 필요한 참조
-    private final JPanel canvas;
-    private BufferedImage mapImage;
-    private SkillEffectManager skillEffects;
-    
-    // 마우스 위치
-    private int mouseX = 400;
-    private int mouseY = 300;
-    
-    // 디버그/편집 모드
-    private boolean debugObstacles = false;
-    private boolean editMode = false;
-    private int hoverCol = -1;
-    private int hoverRow = -1;
-    private int editPaintMode = 0;
-    
-    // 미니맵 표시 여부
-    private boolean showMinimap = true;
-    
-    public GameRenderer(JPanel canvas) {
-        this.canvas = canvas;
-        this.skillEffects = new SkillEffectManager();
-    }
-    
-    /**
-     * 기본 생성자 - 렌더링 시 필요한 정보는 render() 메서드 파라미터로 전달
-     */
     public GameRenderer() {
-        this.canvas = null;
-        this.skillEffects = new SkillEffectManager();
+        // 파라미터 없는 생성자 - 렌더링에 필요한 데이터는 메서드 파라미터로 전달
     }
     
-    // Setters
-    public void setMapImage(BufferedImage image) { this.mapImage = image; }
-    public void setSkillEffects(SkillEffectManager effects) { this.skillEffects = effects; }
-    public void setMousePosition(int x, int y) { this.mouseX = x; this.mouseY = y; }
-    public void setDebugObstacles(boolean debug) { this.debugObstacles = debug; }
-    public void setEditMode(boolean mode) { this.editMode = mode; }
-    public void setHoverTile(int col, int row) { this.hoverCol = col; this.hoverRow = row; }
-    public void setEditPaintMode(int mode) { this.editPaintMode = mode; }
-    public void setShowMinimap(boolean show) { this.showMinimap = show; }
-    
     /**
-     * 메인 렌더링 메서드
+     * 메인 렌더링 진입점
      */
-    public void render(Graphics2D g2d, GameState gameState, 
-                      String playerName, int team,
-                      SpriteAnimation[] myAnimations,
-                      CharacterData currentCharacterData,
-                      Ability[] abilities,
-                      int kills, int deaths,
-                      String selectedCharacter,
-                      float piperMarkRemaining,
-                      float piperThermalRemaining,
-                      GameState.RoundState roundState,
-                      int roundCount,
-                      int redWins,
-                      int blueWins,
-                      long roundStartTime,
-                      String centerMessage,
-                      long centerMessageEndTime) {
-        
+    public void render(Graphics g, RenderContext ctx) {
+        Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
-        int playerX = gameState.getPlayerX();
-        int playerY = gameState.getPlayerY();
-        int cameraX = gameState.getCameraX();
-        int cameraY = gameState.getCameraY();
-        int myHP = gameState.getMyHP();
-        int myMaxHP = gameState.getMyMaxHP();
-        int myDirection = gameState.getMyDirection();
-        
         // 1. 맵 배경
-        if (mapImage != null) {
-            g2d.drawImage(mapImage, -cameraX, -cameraY, gameState.getMapWidth(), gameState.getMapHeight(), null);
-        } else {
-            drawGrid(g2d, cameraX, cameraY);
-        }
+        drawMap(g2d, ctx);
         
         // 2. 장애물 디버그
-        drawObstacles(g2d, gameState.getObstacles(), cameraX, cameraY);
+        drawObstacles(g2d, ctx);
         
-        // 2.1 에어스트라이크 마커
-        drawStrikeMarkersMain(g2d, gameState.getStrikeMarkers(), cameraX, cameraY);
+        // 3. 에어스트라이크 마커
+        drawStrikeMarkers(g2d, ctx);
         
-        // 2.5 편집 모드 오버레이
-        if (editMode) {
-            drawEditorOverlay(g2d, gameState.getWalkableGrid(), gameState.getGridCols(), gameState.getGridRows(),
-                    cameraX, cameraY, gameState.getRedSpawnTiles(), gameState.getBlueSpawnTiles());
+        // 4. 편집 모드 오버레이
+        if (ctx.editMode) {
+            drawEditorOverlay(g2d, ctx);
         }
         
-        // 3. 다른 플레이어들
-        for (Map.Entry<String, GameState.PlayerData> entry : gameState.getPlayers().entrySet()) {
-            GameState.PlayerData p = entry.getValue();
-            int screenX = p.x - cameraX;
-            int screenY = p.y - cameraY;
-            
-            if (isOnScreen(screenX, screenY)) {
-                Color playerColor = p.team == GameConstants.TEAM_RED ? 
-                        new Color(244, 67, 54) : new Color(33, 150, 243);
-                
-                // 스프라이트 그리기
-                if (p.animations != null && p.direction < p.animations.length && p.animations[p.direction] != null) {
-                    p.animations[p.direction].draw(g2d, screenX - 20, screenY - 20, 40, 40);
-                } else {
-                    g2d.setColor(playerColor);
-                    g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
-                }
-                
-                // HP 바
-                drawHealthBar(g2d, screenX, screenY + 25, p.hp, p.maxHp);
-            }
+        // 5. 다른 플레이어들
+        drawOtherPlayers(g2d, ctx);
+        
+        // 6. 로컬 플레이어
+        drawLocalPlayer(g2d, ctx);
+        
+        // 7. 조준선
+        drawAimLine(g2d, ctx);
+        
+        // 8. 미사일
+        drawMissiles(g2d, ctx);
+        
+        // 9. 설치된 오브젝트 (지뢰/터렛)
+        drawPlacedObjects(g2d, ctx);
+        
+        // 10. UI 요소들 (항상 마지막)
+        if (ctx.showMinimap) {
+            drawMinimap(g2d, ctx);
         }
-        
-        // 4. 로컬 플레이어
-        int myScreenX = playerX - cameraX;
-        int myScreenY = playerY - cameraY;
-        Color myColor = team == GameConstants.TEAM_RED ? 
-                new Color(255, 100, 100) : new Color(100, 150, 255);
-        
-        if (myAnimations != null && myDirection < myAnimations.length && myAnimations[myDirection] != null) {
-            myAnimations[myDirection].draw(g2d, myScreenX - 20, myScreenY - 20, 40, 40);
+        drawHUD(g2d, ctx);
+        drawRoundInfo(g2d, ctx);
+    }
+    
+    private void drawMap(Graphics2D g2d, RenderContext ctx) {
+        if (ctx.mapImage != null) {
+            g2d.drawImage(ctx.mapImage, -ctx.cameraX, -ctx.cameraY, ctx.mapWidth, ctx.mapHeight, null);
         } else {
-            g2d.setColor(myColor);
-            g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
-        }
-        
-        // 내 이펙트
-        drawMyEffects(g2d, gameState.getMyEffects(), myScreenX, myScreenY);
-        if (skillEffects != null) {
-            skillEffects.drawSelf(g2d, myScreenX, myScreenY);
-        }
-        
-        // 내 이름
-        g2d.setColor(Color.YELLOW);
-        g2d.setFont(new Font("Arial", Font.BOLD, 12));
-        FontMetrics fm = g2d.getFontMetrics();
-        int nameWidth = fm.stringWidth(playerName + " (You)");
-        g2d.drawString(playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
-        
-        // 내 HP 바
-        drawHealthBar(g2d, myScreenX, myScreenY + 25, myHP, myMaxHP);
-        
-        // 조준선
-        drawAimLine(g2d, myScreenX, myScreenY);
-        
-        // 5. 미사일
-        g2d.setColor(Color.YELLOW);
-        for (GameState.Missile m : gameState.getMissiles()) {
-            int mScreenX = m.x - cameraX;
-            int mScreenY = m.y - cameraY;
-            if (isOnScreen(mScreenX, mScreenY)) {
-                g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
-            }
-        }
-        
-        // 6. 설치된 오브젝트
-        for (Map.Entry<Integer, GameState.PlacedObjectClient> entry : gameState.getPlacedObjects().entrySet()) {
-            GameState.PlacedObjectClient obj = entry.getValue();
-            int objScreenX = obj.x - cameraX;
-            int objScreenY = obj.y - cameraY;
-            
-            if (isOnScreen(objScreenX, objScreenY)) {
-                drawPlacedObject(g2d, obj, objScreenX, objScreenY, team);
-            }
-        }
-        
-        // UI 요소
-        if (showMinimap) {
-            drawMinimap(g2d, gameState, playerX, playerY, team);
-        }
-        
-        drawHUD(g2d, playerName, team, currentCharacterData, myHP, myMaxHP, kills, deaths);
-        drawSkillHUD(g2d, abilities, selectedCharacter, piperMarkRemaining, piperThermalRemaining);
-        drawRoundInfo(g2d, roundState, roundCount, redWins, blueWins, roundStartTime, 
-                centerMessage, centerMessageEndTime);
-    }
-    
-    private boolean isOnScreen(int screenX, int screenY) {
-        return screenX >= -50 && screenX <= GameConstants.GAME_WIDTH + 50 &&
-                screenY >= -50 && screenY <= GameConstants.GAME_HEIGHT + 50;
-    }
-    
-    private void drawGrid(Graphics2D g, int cameraX, int cameraY) {
-        g.setColor(new Color(30, 35, 45));
-        for (int x = 0; x < canvas.getWidth(); x += 50) {
-            g.drawLine(x, 0, x, canvas.getHeight());
-        }
-        for (int y = 0; y < canvas.getHeight(); y += 50) {
-            g.drawLine(0, y, canvas.getWidth(), y);
+            drawGrid(g2d, ctx);
         }
     }
     
-    private void drawObstacles(Graphics2D g2d, List<Rectangle> obstacles, int cameraX, int cameraY) {
-        if (!debugObstacles) return;
+    private void drawGrid(Graphics2D g2d, RenderContext ctx) {
+        g2d.setColor(new Color(30, 35, 45));
+        for (int x = 0; x < ctx.canvasWidth; x += 50) {
+            g2d.drawLine(x, 0, x, ctx.canvasHeight);
+        }
+        for (int y = 0; y < ctx.canvasHeight; y += 50) {
+            g2d.drawLine(0, y, ctx.canvasWidth, y);
+        }
+    }
+    
+    private void drawObstacles(Graphics2D g2d, RenderContext ctx) {
+        if (!ctx.debugObstacles) return;
         
         g2d.setColor(new Color(255, 0, 0, 100));
-        for (Rectangle obs : obstacles) {
-            int screenX = obs.x - cameraX;
-            int screenY = obs.y - cameraY;
+        for (Rectangle obs : ctx.obstacles) {
+            int screenX = obs.x - ctx.cameraX;
+            int screenY = obs.y - ctx.cameraY;
             g2d.fillRect(screenX, screenY, obs.width, obs.height);
             g2d.setColor(new Color(255, 255, 0, 150));
             g2d.drawRect(screenX, screenY, obs.width, obs.height);
@@ -231,17 +103,16 @@ public class GameRenderer {
         }
     }
     
-    private void drawStrikeMarkersMain(Graphics2D g2d, Map<Integer, GameState.StrikeMarker> strikeMarkers,
-                                      int cameraX, int cameraY) {
-        if (strikeMarkers.isEmpty()) return;
+    private void drawStrikeMarkers(Graphics2D g2d, RenderContext ctx) {
+        if (ctx.strikeMarkers.isEmpty()) return;
         
-        for (GameState.StrikeMarker marker : strikeMarkers.values()) {
-            int screenX = marker.x - cameraX;
-            int screenY = marker.y - cameraY;
+        long currentTime = System.currentTimeMillis();
+        for (GamePanel.StrikeMarker marker : ctx.strikeMarkers.values()) {
+            int screenX = marker.x - ctx.cameraX;
+            int screenY = marker.y - ctx.cameraY;
             
-            if (isOnScreen(screenX, screenY)) {
+            if (isOnScreen(screenX, screenY, ctx)) {
                 int radius = 120;
-                long currentTime = System.currentTimeMillis();
                 float pulsePhase = (currentTime % 500) / 500f;
                 int alpha = (int) (100 + 50 * Math.sin(pulsePhase * Math.PI * 2));
                 
@@ -265,9 +136,75 @@ public class GameRenderer {
         }
     }
     
-    private void drawAimLine(Graphics2D g2d, int myScreenX, int myScreenY) {
-        int vx = mouseX - myScreenX;
-        int vy = mouseY - myScreenY;
+    private void drawOtherPlayers(Graphics2D g2d, RenderContext ctx) {
+        for (Map.Entry<String, GamePanel.PlayerData> entry : ctx.players.entrySet()) {
+            GamePanel.PlayerData p = entry.getValue();
+            int screenX = p.x - ctx.cameraX;
+            int screenY = p.y - ctx.cameraY;
+            
+            if (isOnScreen(screenX, screenY, ctx)) {
+                Color playerColor = p.team == GameConstants.TEAM_RED ? 
+                    new Color(244, 67, 54) : new Color(33, 150, 243);
+                
+                if (p.animations != null) {
+                    int animIndex = p.direction;
+                    if (animIndex < p.animations.length && p.animations[animIndex] != null) {
+                        p.animations[animIndex].draw(g2d, screenX - 20, screenY - 20, 40, 40);
+                    } else {
+                        g2d.setColor(playerColor);
+                        g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
+                    }
+                } else {
+                    g2d.setColor(playerColor);
+                    g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
+                }
+                
+                drawHealthBar(g2d, screenX, screenY + 25, p.hp, p.maxHp);
+            }
+        }
+    }
+    
+    private void drawLocalPlayer(Graphics2D g2d, RenderContext ctx) {
+        int myScreenX = ctx.playerX - ctx.cameraX;
+        int myScreenY = ctx.playerY - ctx.cameraY;
+        
+        Color myColor = ctx.team == GameConstants.TEAM_RED ? 
+            new Color(255, 100, 100) : new Color(100, 150, 255);
+        
+        if (ctx.myAnimations != null) {
+            int animIndex = ctx.myDirection;
+            if (animIndex < ctx.myAnimations.length && ctx.myAnimations[animIndex] != null) {
+                ctx.myAnimations[animIndex].draw(g2d, myScreenX - 20, myScreenY - 20, 40, 40);
+            } else {
+                g2d.setColor(myColor);
+                g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+            }
+        } else {
+            g2d.setColor(myColor);
+            g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
+        }
+        
+        // 이펙트
+        drawMyEffects(g2d, ctx);
+        ctx.skillEffects.drawSelf(g2d, myScreenX, myScreenY);
+        
+        // 이름
+        g2d.setColor(Color.YELLOW);
+        g2d.setFont(new Font("Arial", Font.BOLD, 12));
+        FontMetrics fm = g2d.getFontMetrics();
+        int nameWidth = fm.stringWidth(ctx.playerName + " (You)");
+        g2d.drawString(ctx.playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
+        
+        // HP 바
+        drawHealthBar(g2d, myScreenX, myScreenY + 25, ctx.myHP, ctx.myMaxHP);
+    }
+    
+    private void drawAimLine(Graphics2D g2d, RenderContext ctx) {
+        int myScreenX = ctx.playerX - ctx.cameraX;
+        int myScreenY = ctx.playerY - ctx.cameraY;
+        
+        int vx = ctx.mouseX - myScreenX;
+        int vy = ctx.mouseY - myScreenY;
         if (vx == 0 && vy == 0) return;
         
         double len = Math.sqrt(vx * vx + vy * vy);
@@ -286,16 +223,18 @@ public class GameRenderer {
         g2d.setStroke(oldStroke);
         
         g2d.setColor(new Color(255, 255, 0, 150));
-        g2d.drawOval(mouseX - 4, mouseY - 4, 8, 8);
-        g2d.drawLine(mouseX - 6, mouseY, mouseX + 6, mouseY);
-        g2d.drawLine(mouseX, mouseY - 6, mouseX, mouseY + 6);
+        g2d.drawOval(ctx.mouseX - 4, ctx.mouseY - 4, 8, 8);
+        g2d.drawLine(ctx.mouseX - 6, ctx.mouseY, ctx.mouseX + 6, ctx.mouseY);
+        g2d.drawLine(ctx.mouseX, ctx.mouseY - 6, ctx.mouseX, ctx.mouseY + 6);
     }
     
-    private void drawMyEffects(Graphics2D g2d, List<GameState.ActiveEffect> myEffects, 
-                              int myScreenX, int myScreenY) {
-        if (myEffects.isEmpty()) return;
+    private void drawMyEffects(Graphics2D g2d, RenderContext ctx) {
+        if (ctx.myEffects.isEmpty()) return;
         
-        for (GameState.ActiveEffect ef : myEffects) {
+        int myScreenX = ctx.playerX - ctx.cameraX;
+        int myScreenY = ctx.playerY - ctx.cameraY;
+        
+        for (GamePanel.ActiveEffect ef : ctx.myEffects) {
             float progress = 1f - (ef.remaining / ef.duration);
             int radius = 28 + (int) (Math.sin(progress * 6.28318) * 4);
             int alpha = (int) (160 * (ef.remaining / ef.duration));
@@ -325,6 +264,82 @@ public class GameRenderer {
         }
     }
     
+    private void drawMissiles(Graphics2D g2d, RenderContext ctx) {
+        g2d.setColor(Color.YELLOW);
+        for (GamePanel.Missile m : ctx.missiles) {
+            int mScreenX = m.x - ctx.cameraX;
+            int mScreenY = m.y - ctx.cameraY;
+            if (isOnScreen(mScreenX, mScreenY, ctx)) {
+                g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
+            }
+        }
+    }
+    
+    private void drawPlacedObjects(Graphics2D g2d, RenderContext ctx) {
+        for (Map.Entry<Integer, GamePanel.PlacedObjectClient> entry : ctx.placedObjects.entrySet()) {
+            GamePanel.PlacedObjectClient obj = entry.getValue();
+            int objScreenX = obj.x - ctx.cameraX;
+            int objScreenY = obj.y - ctx.cameraY;
+            
+            if (isOnScreen(objScreenX, objScreenY, ctx)) {
+                Color objColor;
+                int size;
+                String label;
+                
+                if ("tech_mine".equals(obj.type)) {
+                    objColor = obj.team == GameConstants.TEAM_RED ? 
+                        new Color(200, 50, 50) : new Color(50, 100, 200);
+                    size = 16;
+                    label = "지뢰";
+                } else if ("tech_turret".equals(obj.type)) {
+                    objColor = obj.team == GameConstants.TEAM_RED ? 
+                        new Color(220, 80, 80) : new Color(80, 120, 220);
+                    size = 24;
+                    label = "터렛";
+                } else {
+                    objColor = Color.GRAY;
+                    size = 20;
+                    label = "?";
+                }
+                
+                g2d.setColor(objColor);
+                g2d.fillRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
+                
+                g2d.setColor(obj.team == ctx.team ? Color.GREEN : Color.RED);
+                g2d.setStroke(new BasicStroke(2f));
+                g2d.drawRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
+                
+                int barWidth = 30;
+                int barHeight = 4;
+                int barY = objScreenY - size / 2 - 8;
+                
+                g2d.setColor(Color.DARK_GRAY);
+                g2d.fillRect(objScreenX - barWidth / 2, barY, barWidth, barHeight);
+                
+                float hpPercent = (float) obj.hp / obj.maxHp;
+                Color hpColor = hpPercent > 0.6f ? Color.GREEN : 
+                               (hpPercent > 0.3f ? Color.YELLOW : Color.RED);
+                
+                g2d.setColor(hpColor);
+                int currentBarWidth = (int) (barWidth * hpPercent);
+                g2d.fillRect(objScreenX - barWidth / 2, barY, currentBarWidth, barHeight);
+                
+                g2d.setFont(new Font("맑은 고딕", Font.BOLD, 10));
+                g2d.setColor(Color.WHITE);
+                FontMetrics objFm = g2d.getFontMetrics();
+                int labelWidth = objFm.stringWidth(label);
+                g2d.drawString(label, objScreenX - labelWidth / 2, objScreenY + size / 2 + 12);
+                
+                String hpText = obj.hp + "/" + obj.maxHp;
+                g2d.setFont(new Font("Arial", Font.PLAIN, 9));
+                objFm = g2d.getFontMetrics();
+                int hpWidth = objFm.stringWidth(hpText);
+                g2d.setColor(new Color(255, 255, 255, 200));
+                g2d.drawString(hpText, objScreenX - hpWidth / 2, barY - 2);
+            }
+        }
+    }
+    
     private void drawHealthBar(Graphics2D g, int x, int y, int hp, int maxHp) {
         int barWidth = 40;
         int barHeight = 5;
@@ -338,111 +353,128 @@ public class GameRenderer {
         g.fillRect(x - barWidth / 2, y, currentWidth, barHeight);
     }
     
-    private void drawPlacedObject(Graphics2D g2d, GameState.PlacedObjectClient obj,
-                                 int objScreenX, int objScreenY, int myTeam) {
-        Color objColor;
-        int size;
-        String label;
-        
-        if ("tech_mine".equals(obj.type)) {
-            objColor = obj.team == GameConstants.TEAM_RED ? 
-                    new Color(200, 50, 50) : new Color(50, 100, 200);
-            size = 16;
-            label = "지뢰";
-        } else if ("tech_turret".equals(obj.type)) {
-            objColor = obj.team == GameConstants.TEAM_RED ? 
-                    new Color(220, 80, 80) : new Color(80, 120, 220);
-            size = 24;
-            label = "터렛";
-        } else {
-            objColor = Color.GRAY;
-            size = 20;
-            label = "?";
-        }
-        
-        g2d.setColor(objColor);
-        g2d.fillRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-        
-        g2d.setColor(obj.team == myTeam ? Color.GREEN : Color.RED);
-        g2d.setStroke(new BasicStroke(2f));
-        g2d.drawRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-        
-        // HP 바
-        int barWidth = 30;
-        int barHeight = 4;
-        int barY = objScreenY - size / 2 - 8;
-        
-        g2d.setColor(Color.DARK_GRAY);
-        g2d.fillRect(objScreenX - barWidth / 2, barY, barWidth, barHeight);
-        
-        float hpPercent = (float) obj.hp / obj.maxHp;
-        Color hpColor = hpPercent > 0.6f ? Color.GREEN : 
-                       hpPercent > 0.3f ? Color.YELLOW : Color.RED;
-        
-        g2d.setColor(hpColor);
-        int currentBarWidth = (int) (barWidth * hpPercent);
-        g2d.fillRect(objScreenX - barWidth / 2, barY, currentBarWidth, barHeight);
-        
-        g2d.setFont(new Font("맑은 고딕", Font.BOLD, 10));
-        g2d.setColor(Color.WHITE);
-        FontMetrics objFm = g2d.getFontMetrics();
-        int labelWidth = objFm.stringWidth(label);
-        g2d.drawString(label, objScreenX - labelWidth / 2, objScreenY + size / 2 + 12);
-        
-        String hpText = obj.hp + "/" + obj.maxHp;
-        g2d.setFont(new Font("Arial", Font.PLAIN, 9));
-        objFm = g2d.getFontMetrics();
-        int hpWidth = objFm.stringWidth(hpText);
-        g2d.setColor(new Color(255, 255, 255, 200));
-        g2d.drawString(hpText, objScreenX - hpWidth / 2, barY - 2);
-    }
-    
-    private void drawMinimap(Graphics2D g2d, GameState gameState, int playerX, int playerY, int myTeam) {
+    private void drawMinimap(Graphics2D g2d, RenderContext ctx) {
         int minimapWidth = 200;
         int minimapHeight = 150;
-        int minimapX = canvas.getWidth() - minimapWidth - 20;
+        int minimapX = ctx.canvasWidth - minimapWidth - 20;
         int minimapY = 20;
         
-        float scaleX = (float) minimapWidth / gameState.getMapWidth();
-        float scaleY = (float) minimapHeight / gameState.getMapHeight();
+        float scaleX = (float) minimapWidth / ctx.mapWidth;
+        float scaleY = (float) minimapHeight / ctx.mapHeight;
         
-        if (mapImage != null) {
-            g2d.drawImage(mapImage, minimapX, minimapY, minimapWidth, minimapHeight, null);
+        if (ctx.mapImage != null) {
+            g2d.drawImage(ctx.mapImage, minimapX, minimapY, minimapWidth, minimapHeight, null);
         } else {
-            g2d.setColor(new Color(40, 45, 55));
+            g2d.setColor(new Color(20, 20, 30, 200));
             g2d.fillRect(minimapX, minimapY, minimapWidth, minimapHeight);
+            if (ctx.obstacles != null && !ctx.obstacles.isEmpty()) {
+                g2d.setColor(new Color(200, 60, 60, 180));
+                for (Rectangle obs : ctx.obstacles) {
+                    int ox = minimapX + Math.round(obs.x * scaleX);
+                    int oy = minimapY + Math.round(obs.y * scaleY);
+                    int ow = Math.max(1, Math.round(obs.width * scaleX));
+                    int oh = Math.max(1, Math.round(obs.height * scaleY));
+                    g2d.fillRect(ox, oy, ow, oh);
+                }
+            }
         }
         
-        // 테두리
         g2d.setColor(Color.WHITE);
-        g2d.setStroke(new BasicStroke(2f));
         g2d.drawRect(minimapX, minimapY, minimapWidth, minimapHeight);
         
-        // 다른 플레이어들
-        for (GameState.PlayerData p : gameState.getPlayers().values()) {
-            int px = minimapX + (int) (p.x * scaleX);
-            int py = minimapY + (int) (p.y * scaleY);
-            Color dotColor = p.team == GameConstants.TEAM_RED ? 
-                    new Color(255, 100, 100) : new Color(100, 150, 255);
-            g2d.setColor(dotColor);
-            g2d.fillOval(px - 3, py - 3, 6, 6);
-        }
+        int viewX = minimapX + Math.round(ctx.cameraX * scaleX);
+        int viewY = minimapY + Math.round(ctx.cameraY * scaleY);
+        int viewW = Math.max(1, Math.round(GameConstants.GAME_WIDTH * scaleX));
+        int viewH = Math.max(1, Math.round(GameConstants.GAME_HEIGHT * scaleY));
+        g2d.setColor(new Color(255, 255, 255, 120));
+        g2d.drawRect(viewX, viewY, viewW, viewH);
         
-        // 내 위치
-        int myMinimapX = minimapX + (int) (playerX * scaleX);
-        int myMinimapY = minimapY + (int) (playerY * scaleY);
+        int myMinimapX = minimapX + (int) (ctx.playerX * scaleX);
+        int myMinimapY = minimapY + (int) (ctx.playerY * scaleY);
+        
         g2d.setColor(Color.YELLOW);
         g2d.fillOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
-        g2d.setColor(Color.WHITE);
-        g2d.drawOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
-    }
-    
-    private void drawHUD(Graphics2D g, String playerName, int team, CharacterData currentCharacterData,
-                        int myHP, int myMaxHP, int kills, int deaths) {
-        if (currentCharacterData == null) {
-            return;
+        g2d.setColor(Color.ORANGE);
+        g2d.drawOval(myMinimapX - 5, myMinimapY - 5, 10, 10);
+        
+        int visionRadius = (int) (VISION_RANGE * ((scaleX + scaleY) * 0.5f));
+        g2d.setColor(new Color(255, 255, 255, 30));
+        g2d.fillOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
+                visionRadius * 2, visionRadius * 2);
+        g2d.setColor(new Color(255, 255, 255, 80));
+        g2d.drawOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
+                visionRadius * 2, visionRadius * 2);
+        
+        boolean thermalActive = (ctx.piperThermalRemaining > 0f || ctx.teamThermalRemaining > 0f);
+        boolean markActive = !thermalActive && (ctx.piperMarkRemaining > 0f || ctx.teamMarkRemaining > 0f);
+        int extendedRadius = (int) (VISION_RANGE * (markActive ? PIPER_MARK_RANGE_FACTOR : 1f));
+        
+        synchronized (ctx.players) {
+            for (GamePanel.PlayerData pd : ctx.players.values()) {
+                int dx = pd.x - ctx.playerX;
+                int dy = pd.y - ctx.playerY;
+                double distance = Math.sqrt(dx * dx + dy * dy);
+                
+                boolean inViewport = (pd.x >= ctx.cameraX && pd.x <= ctx.cameraX + ctx.canvasWidth &&
+                        pd.y >= ctx.cameraY && pd.y <= ctx.cameraY + ctx.canvasHeight);
+                
+                boolean shouldShow = false;
+                if (thermalActive) {
+                    shouldShow = true;
+                } else if (markActive && distance <= extendedRadius) {
+                    shouldShow = true;
+                } else if (!markActive && !thermalActive && distance <= VISION_RANGE && inViewport) {
+                    shouldShow = true;
+                }
+                
+                if (shouldShow) {
+                    int otherX = minimapX + (int) (pd.x * scaleX);
+                    int otherY = minimapY + (int) (pd.y * scaleY);
+                    if (thermalActive) {
+                        g2d.setColor(new Color(255, 180, 0));
+                        g2d.fillOval(otherX - PIPER_THERMAL_DOT_SIZE / 2, otherY - PIPER_THERMAL_DOT_SIZE / 2,
+                                PIPER_THERMAL_DOT_SIZE, PIPER_THERMAL_DOT_SIZE);
+                    } else {
+                        if (pd.team == GameConstants.TEAM_BLUE) {
+                            g2d.setColor(Color.BLUE);
+                        } else if (pd.team == GameConstants.TEAM_RED) {
+                            g2d.setColor(Color.RED);
+                        } else {
+                            g2d.setColor(Color.GRAY);
+                        }
+                        g2d.fillOval(otherX - 3, otherY - 3, 6, 6);
+                    }
+                }
+            }
         }
         
+        for (Map.Entry<Integer, GamePanel.StrikeMarker> entry : ctx.strikeMarkers.entrySet()) {
+            GamePanel.StrikeMarker marker = entry.getValue();
+            int markerX = minimapX + (int) (marker.x * scaleX);
+            int markerY = minimapY + (int) (marker.y * scaleY);
+            
+            long currentTime = System.currentTimeMillis();
+            float pulsePhase = (currentTime % 1000) / 1000f;
+            int pulseAlpha = (int) (150 + 105 * Math.sin(pulsePhase * Math.PI * 2));
+            g2d.setColor(new Color(255, 0, 0, pulseAlpha));
+            g2d.fillOval(markerX - 8, markerY - 8, 16, 16);
+            
+            g2d.setColor(new Color(255, 255, 0, 255));
+            g2d.setStroke(new BasicStroke(2f));
+            g2d.drawLine(markerX - 10, markerY, markerX + 10, markerY);
+            g2d.drawLine(markerX, markerY - 10, markerX, markerY + 10);
+            
+            g2d.setFont(new Font("Arial", Font.BOLD, 9));
+            g2d.setColor(new Color(255, 255, 255, 255));
+            g2d.drawString("!", markerX - 3, markerY + 4);
+        }
+        
+        g2d.setColor(Color.WHITE);
+        g2d.setFont(new Font("Arial", Font.BOLD, 10));
+        g2d.drawString("MAP", minimapX + 5, minimapY + 12);
+    }
+    
+    private void drawHUD(Graphics2D g, RenderContext ctx) {
         g.setColor(new Color(0, 0, 0, 150));
         g.fillRect(10, 10, 250, 160);
         
@@ -450,41 +482,43 @@ public class GameRenderer {
         g.setColor(Color.WHITE);
         
         int yPos = 30;
-        g.drawString("플레이어: " + playerName, 20, yPos);
+        g.drawString("플레이어: " + ctx.playerName, 20, yPos);
         yPos += 20;
-        g.drawString("팀: " + (team == GameConstants.TEAM_RED ? "RED" : "BLUE"), 20, yPos);
+        g.drawString("팀: " + (ctx.team == GameConstants.TEAM_RED ? "RED" : "BLUE"), 20, yPos);
         yPos += 20;
-        g.drawString("캐릭터: " + currentCharacterData.name, 20, yPos);
+        g.drawString("캐릭터: " + ctx.currentCharacterData.name, 20, yPos);
         yPos += 20;
-        g.drawString("HP: " + myHP + "/" + myMaxHP, 20, yPos);
-        drawHealthBar(g, 130, yPos - 12, myHP, myMaxHP);
+        
+        g.drawString("HP: " + ctx.myHP + "/" + ctx.myMaxHP, 20, yPos);
+        drawHealthBar(g, 130, yPos - 12, ctx.myHP, ctx.myMaxHP);
         yPos += 20;
         
         g.setColor(new Color(255, 215, 0));
-        g.drawString("Kills: " + kills + " / Deaths: " + deaths, 20, yPos);
+        g.drawString("Kills: " + ctx.kills + " / Deaths: " + ctx.deaths, 20, yPos);
         yPos += 20;
         
         g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
         g.setColor(new Color(255, 200, 200));
-        g.drawString("최대HP: " + (int) currentCharacterData.health, 20, yPos);
+        g.drawString("최대HP: " + (int) ctx.currentCharacterData.health, 20, yPos);
         yPos += 18;
         g.setColor(new Color(200, 255, 200));
-        g.drawString("속도: " + String.format("%.1f", currentCharacterData.speed), 20, yPos);
+        g.drawString("속도: " + String.format("%.1f", ctx.currentCharacterData.speed), 20, yPos);
+        
+        drawSkillHUD(g, ctx);
         
         g.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
         g.setColor(Color.YELLOW);
-        g.drawString("좌클릭: 기본공격 | E: 전술스킬 | R: 궁극기", 20, canvas.getHeight() - 40);
-        g.drawString("B키: 캐릭터 선택", 20, canvas.getHeight() - 20);
+        g.drawString("좌클릭: 기본공격 | E: 전술스킬 | R: 궁극기", 20, ctx.canvasHeight - 40);
+        g.drawString("B키: 캐릭터 선택", 20, ctx.canvasHeight - 20);
     }
     
-    private void drawSkillHUD(Graphics2D g, Ability[] abilities, String selectedCharacter,
-                             float piperMarkRemaining, float piperThermalRemaining) {
-        if (abilities == null) return;
+    private void drawSkillHUD(Graphics2D g, RenderContext ctx) {
+        if (ctx.abilities == null) return;
         
         int hudWidth = 400;
         int hudHeight = 80;
-        int hudX = (canvas.getWidth() - hudWidth) / 2;
-        int hudY = canvas.getHeight() - hudHeight - 70;
+        int hudX = (ctx.canvasWidth - hudWidth) / 2;
+        int hudY = ctx.canvasHeight - hudHeight - 70;
         
         g.setColor(new Color(0, 0, 0, 180));
         g.fillRoundRect(hudX, hudY, hudWidth, hudHeight, 10, 10);
@@ -502,8 +536,8 @@ public class GameRenderer {
                 new Color(255, 100, 100)
         };
         
-        for (int i = 0; i < 3 && i < abilities.length; i++) {
-            Ability ability = abilities[i];
+        for (int i = 0; i < 3 && i < ctx.abilities.length; i++) {
+            Ability ability = ctx.abilities[i];
             int skillX = startX + i * (skillWidth + skillGap);
             
             if (ability.canUse()) {
@@ -513,12 +547,12 @@ public class GameRenderer {
             }
             g.fillRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
             
-            boolean piper = "piper".equalsIgnoreCase(selectedCharacter);
+            boolean piper = "piper".equalsIgnoreCase(ctx.selectedCharacter);
             float remain = 0f;
             Color activeBorder = Color.WHITE;
             if (piper) {
-                if (i == 1) remain = Math.max(piperMarkRemaining, 0f);
-                else if (i == 2) remain = Math.max(piperThermalRemaining, 0f);
+                if (i == 1) remain = Math.max(ctx.piperMarkRemaining, 0f);
+                else if (i == 2) remain = Math.max(ctx.piperThermalRemaining, 0f);
                 if (remain > 0f) {
                     activeBorder = (i == 1) ? new Color(80, 200, 255) : new Color(255, 160, 40);
                 }
@@ -562,44 +596,46 @@ public class GameRenderer {
         }
     }
     
-    private void drawRoundInfo(Graphics2D g, GameState.RoundState roundState, int roundCount,
-                              int redWins, int blueWins, long roundStartTime,
-                              String centerMessage, long centerMessageEndTime) {
-        int centerX = canvas.getWidth() / 2;
+    private void drawRoundInfo(Graphics2D g, RenderContext ctx) {
+        int centerX = ctx.canvasWidth / 2;
         g.setColor(new Color(0, 0, 0, 150));
         g.fillRect(centerX - 100, 0, 200, 40);
         
         g.setFont(new Font("Arial", Font.BOLD, 24));
         g.setColor(new Color(255, 100, 100));
-        g.drawString(String.valueOf(redWins), centerX - 60, 30);
+        g.drawString(String.valueOf(ctx.redWins), centerX - 60, 30);
         
         g.setColor(Color.WHITE);
         g.drawString(":", centerX, 28);
         
         g.setColor(new Color(100, 150, 255));
-        g.drawString(String.valueOf(blueWins), centerX + 40, 30);
+        g.drawString(String.valueOf(ctx.blueWins), centerX + 40, 30);
         
         g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
         g.setColor(Color.WHITE);
-        g.drawString("Round " + roundCount, centerX - 30, 55);
+        g.drawString("Round " + ctx.roundCount, centerX - 30, 55);
         
-        if (roundState == GameState.RoundState.WAITING) {
-            long remaining = Math.max(0, 10000 - (System.currentTimeMillis() - roundStartTime));
+        if (ctx.roundState == GamePanel.RoundState.WAITING) {
+            long remaining = Math.max(0, GamePanel.ROUND_READY_TIME - (System.currentTimeMillis() - ctx.roundStartTime));
             int sec = (int) (remaining / 1000) + 1;
             if (remaining > 0) {
-                drawCenterText(g, "라운드 시작까지 " + sec + "초", 40, Color.YELLOW, 0);
-                drawCenterText(g, "캐릭터를 변경할 수 있습니다 (B키)", 20, Color.WHITE, 50);
+                drawCenterText(g, "라운드 시작까지 " + sec + "초", 40, Color.YELLOW, ctx);
+                drawCenterText(g, "캐릭터를 변경할 수 있습니다 (B키)", 20, Color.WHITE, 50, ctx);
             }
-        } else if (!centerMessage.isEmpty() && System.currentTimeMillis() < centerMessageEndTime) {
-            drawCenterText(g, centerMessage, 40, Color.YELLOW, 0);
+        } else if (!ctx.centerMessage.isEmpty() && System.currentTimeMillis() < ctx.centerMessageEndTime) {
+            drawCenterText(g, ctx.centerMessage, 40, Color.YELLOW, ctx);
         }
     }
     
-    private void drawCenterText(Graphics2D g, String text, int size, Color color, int yOffset) {
+    private void drawCenterText(Graphics2D g, String text, int size, Color color, RenderContext ctx) {
+        drawCenterText(g, text, size, color, 0, ctx);
+    }
+    
+    private void drawCenterText(Graphics2D g, String text, int size, Color color, int yOffset, RenderContext ctx) {
         g.setFont(new Font("맑은 고딕", Font.BOLD, size));
         FontMetrics fm = g.getFontMetrics();
-        int x = (canvas.getWidth() - fm.stringWidth(text)) / 2;
-        int y = (canvas.getHeight() / 2) + yOffset;
+        int x = (ctx.canvasWidth - fm.stringWidth(text)) / 2;
+        int y = (ctx.canvasHeight / 2) + yOffset;
         
         g.setColor(Color.BLACK);
         g.drawString(text, x + 2, y + 2);
@@ -608,72 +644,120 @@ public class GameRenderer {
         g.drawString(text, x, y);
     }
     
-    private void drawEditorOverlay(Graphics2D g2d, boolean[][] walkableGrid, int gridCols, int gridRows,
-                                  int cameraX, int cameraY, List<int[]> redSpawnTiles, List<int[]> blueSpawnTiles) {
-        if (walkableGrid == null) return;
+    private void drawEditorOverlay(Graphics2D g2d, RenderContext ctx) {
+        if (ctx.walkableGrid == null) return;
         
-        int startCol = cameraX / TILE_SIZE;
-        int startRow = cameraY / TILE_SIZE;
-        int endCol = Math.min(gridCols - 1, (cameraX + GameConstants.GAME_WIDTH) / TILE_SIZE + 1);
-        int endRow = Math.min(gridRows - 1, (cameraY + GameConstants.GAME_HEIGHT) / TILE_SIZE + 1);
+        int startCol = ctx.cameraX / ctx.tileSize;
+        int startRow = ctx.cameraY / ctx.tileSize;
+        int endCol = Math.min(ctx.gridCols - 1, (ctx.cameraX + GameConstants.GAME_WIDTH) / ctx.tileSize + 1);
+        int endRow = Math.min(ctx.gridRows - 1, (ctx.cameraY + GameConstants.GAME_HEIGHT) / ctx.tileSize + 1);
         
         Rectangle minimapRect = null;
-        if (showMinimap) {
+        if (ctx.showMinimap) {
             int minimapWidth = 200;
             int minimapHeight = 150;
-            int minimapX = canvas.getWidth() - minimapWidth - 20;
+            int minimapX = ctx.canvasWidth - minimapWidth - 20;
             int minimapY = 20;
             minimapRect = new Rectangle(minimapX, minimapY, minimapWidth, minimapHeight);
         }
         
         for (int r = startRow; r <= endRow; r++) {
             for (int c = startCol; c <= endCol; c++) {
-                boolean walkable = walkableGrid[r][c];
-                int px = c * TILE_SIZE - cameraX;
-                int py = r * TILE_SIZE - cameraY;
+                boolean walkable = ctx.walkableGrid[r][c];
+                int px = c * ctx.tileSize - ctx.cameraX;
+                int py = r * ctx.tileSize - ctx.cameraY;
                 
-                if (minimapRect != null) {
-                    Rectangle tileRect = new Rectangle(px, py, TILE_SIZE, TILE_SIZE);
-                    if (tileRect.intersects(minimapRect)) {
-                        continue;
-                    }
+                if (minimapRect != null && minimapRect.intersects(px, py, ctx.tileSize, ctx.tileSize)) {
+                    continue;
                 }
                 
-                Color base = walkable ? new Color(0, 180, 0, 55) : new Color(180, 0, 0, 60);
-                if (isSpawnTile(redSpawnTiles, c, r)) {
-                    base = new Color(255, 60, 60, 120);
-                } else if (isSpawnTile(blueSpawnTiles, c, r)) {
-                    base = new Color(60, 120, 255, 120);
+                if (walkable) {
+                    g2d.setColor(new Color(0, 255, 0, 30));
+                } else {
+                    g2d.setColor(new Color(255, 0, 0, 60));
                 }
-                g2d.setColor(base);
-                g2d.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                g2d.fillRect(px, py, ctx.tileSize, ctx.tileSize);
+                
+                g2d.setColor(new Color(150, 150, 150, 100));
+                g2d.drawRect(px, py, ctx.tileSize, ctx.tileSize);
             }
         }
-        
-        if (hoverCol >= 0 && hoverRow >= 0 && hoverCol < gridCols && hoverRow < gridRows) {
-            int hx = hoverCol * TILE_SIZE - cameraX;
-            int hy = hoverRow * TILE_SIZE - cameraY;
-            g2d.setColor(new Color(255, 255, 0, 120));
-            g2d.drawRect(hx, hy, TILE_SIZE - 1, TILE_SIZE - 1);
-        }
-        
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 12));
-        String modeName = switch (editPaintMode) {
-            case 0 -> "이동 가능";
-            case 1 -> "이동 불가";
-            case 2 -> "RED 스폰";
-            case 3 -> "BLUE 스폰";
-            default -> "알 수 없음";
-        };
-        g2d.drawString("편집 모드: " + modeName + " (F5로 변경)", 10, canvas.getHeight() - 60);
     }
     
-    private boolean isSpawnTile(List<int[]> tiles, int col, int row) {
-        if (tiles == null) return false;
-        for (int[] t : tiles) {
-            if (t[0] == col && t[1] == row) return true;
-        }
-        return false;
+    private boolean isOnScreen(int screenX, int screenY, RenderContext ctx) {
+        return screenX >= -100 && screenX <= ctx.canvasWidth + 100 &&
+               screenY >= -100 && screenY <= ctx.canvasHeight + 100;
+    }
+    
+    /**
+     * 렌더링에 필요한 모든 데이터를 담는 컨텍스트 클래스
+     */
+    public static class RenderContext {
+        // 맵 데이터
+        public Image mapImage;
+        public int mapWidth;
+        public int mapHeight;
+        public int cameraX;
+        public int cameraY;
+        public List<Rectangle> obstacles;
+        public boolean debugObstacles;
+        
+        // 플레이어 데이터
+        public String playerName;
+        public int team;
+        public int playerX;
+        public int playerY;
+        public int myDirection;
+        public SpriteAnimation[] myAnimations;
+        public int myHP;
+        public int myMaxHP;
+        public int mouseX;
+        public int mouseY;
+        public String selectedCharacter;
+        public CharacterData currentCharacterData;
+        
+        // 다른 플레이어들
+        public Map<String, GamePanel.PlayerData> players;
+        
+        // 게임 오브젝트
+        public List<GamePanel.Missile> missiles;
+        public Map<Integer, GamePanel.PlacedObjectClient> placedObjects;
+        public Map<Integer, GamePanel.StrikeMarker> strikeMarkers;
+        
+        // 이펙트
+        public List<GamePanel.ActiveEffect> myEffects;
+        public SkillEffectManager skillEffects;
+        
+        // UI 상태
+        public boolean showMinimap;
+        public boolean editMode;
+        public int kills;
+        public int deaths;
+        public Ability[] abilities;
+        
+        // 라운드 정보
+        public int redWins;
+        public int blueWins;
+        public int roundCount;
+        public GamePanel.RoundState roundState;
+        public long roundStartTime;
+        public String centerMessage;
+        public long centerMessageEndTime;
+        
+        // Piper 스킬 상태
+        public float piperMarkRemaining;
+        public float piperThermalRemaining;
+        public float teamMarkRemaining;
+        public float teamThermalRemaining;
+        
+        // 캔버스 크기
+        public int canvasWidth;
+        public int canvasHeight;
+        
+        // 편집 모드 데이터
+        public boolean[][] walkableGrid;
+        public int tileSize;
+        public int gridCols;
+        public int gridRows;
     }
 }

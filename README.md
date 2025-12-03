@@ -1,3 +1,29 @@
+## Recent Updates
+
+### Architecture Refactoring (2025-12-03) ✨
+**SOLID 원칙을 준수하는 MVC 패턴 리팩터링 완료**
+
+게임 로직과 렌더링을 완전히 분리하여 코드 품질과 유지보수성을 대폭 향상:
+
+- **GameRenderer**: 모든 렌더링 로직을 전담 (~800줄)
+  - `RenderContext` 패턴으로 데이터 수신
+  - GamePanel 의존성 완전 제거
+  - 단일 책임 원칙(SRP) 준수
+  
+- **GamePanel**: 게임 로직과 상태 관리만 담당 (~800줄 감소)
+  - 렌더링 구현 코드 제거 (renderGame + 13개 draw 메서드)
+  - `createRenderContext()`로 렌더링 데이터 제공
+  - 깔끔한 책임 분리
+
+- **GameState**: 게임 상태 중앙 관리
+  - 플레이어, 캐릭터, 스킬 상태 통합 관리
+  - NetworkClient와 협업
+
+**장점:**
+- 렌더링 버그 수정이 게임 로직에 영향 없음
+- 테스트 용이성 향상
+- 코드 가독성 및 유지보수성 대폭 개선
+
 ## Fixes (2025-11-09)
 
 - Fixed basic attack direction when camera is moved:

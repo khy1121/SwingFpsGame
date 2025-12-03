@@ -51,7 +51,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
 
     // 스킬 이펙트 (네트워크 포함)
-    private static class ActiveEffect {
+    public static class ActiveEffect {
         String abilityId;
         String type; // BASIC, TACTICAL, ULTIMATE
         float duration; // 총 지속시간(초)
@@ -177,7 +177,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private float attackSpeedMultiplier = 1.0f;
 
     // 라운드 시스템
-    private enum RoundState {
+    public enum RoundState {
         WAITING, PLAYING, ENDED
     }
 
@@ -187,7 +187,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private int blueWins = 0;
     private long roundStartTime = 0;
     private static final int MAX_ROUNDS = 3; // 3판 2선승
-    private static final int ROUND_READY_TIME = 10000; // 10초 대기
+    public static final int ROUND_READY_TIME = 10000; // 10초 대기
     private String centerMessage = "";
     private long centerMessageEndTime = 0;
 
@@ -370,788 +370,84 @@ public class GamePanel extends JFrame implements KeyListener {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            Graphics2D g2d = (Graphics2D) g;
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-            // 1. 맵 배경 그리기 (카메라 오프셋 적용)
-            if (mapImage != null) {
-                g2d.drawImage(mapImage, -cameraX, -cameraY, mapWidth, mapHeight, null);
-            } else {
-                // 폴백: 그리드
-                drawGrid(g2d);
-            }
-
-            // 2. 장애물 디버그 표시 (개발용 - 위치 확인)
-            drawObstacles(g2d);
-
-            // 2.1 에어스트라이크 마커 (바닥 표시)
-            drawStrikeMarkersMain(g2d);
-
-            // 2.5. 편집 모드 타일 오버레이 (UI 렌더링 이전에 호출)
-            if (editMode) {
-                drawEditorOverlay(g2d);
-            }
-
-            // ...existing code...
-
-            // ...existing code...
-
-            // 3. 다른 플레이어들 그리기 (화면 좌표로 변환)
-            for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
-                PlayerData p = entry.getValue();
-
-                // 맵 좌표를 화면 좌표로 변환
-                int screenX = p.x - cameraX;
-                int screenY = p.y - cameraY;
-
-                // 화면 내에 있는 경우에만 그리기 (최적화)
-                if (isOnScreen(screenX, screenY)) {
-                    Color playerColor = p.team == GameConstants.TEAM_RED ? new Color(244, 67, 54)
-                            : new Color(33, 150, 243);
-
-                    // 스프라이트 그리기 (원격 플레이어)
-                    if (p.animations != null) {
-                        int animIndex = p.direction;
-                        if (animIndex < p.animations.length && p.animations[animIndex] != null) {
-                            // 애니메이션 그리는 코드
-                            p.animations[animIndex].draw(g2d, screenX - 20, screenY - 20, 40, 40);
-                        } else {
-                            // Fallback
-                            g2d.setColor(playerColor);
-                            g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
-                        }
-                    } else {
-                        // 기본 원 그리기
-                        g2d.setColor(playerColor);
-                        g2d.fillOval(screenX - 20, screenY - 20, 48, 64);
-                    }
-
-                    // HP 바
-                    drawHealthBar(g2d, screenX, screenY + 25, p.hp, p.maxHp);
-                }
-            }
-
-            // 4. 로컬 플레이어 그리기 (화면 좌표)
-            int myScreenX = playerX - cameraX;
-            int myScreenY = playerY - cameraY;
-
-            Color myColor = team == GameConstants.TEAM_RED ? new Color(255, 100, 100) : new Color(100, 150, 255);
-            // 내 스프라이트 그리기
-            if (myAnimations != null) {
-                int animIndex = myDirection;
-                if (animIndex < myAnimations.length && myAnimations[animIndex] != null) {
-                    // 애니메이션 그리는 코드
-                    myAnimations[animIndex].draw(g2d, myScreenX - 20, myScreenY - 20, 40, 40);
-                } else {
-                    g2d.setColor(myColor);
-                    g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
-                }
-            } else {
-                g2d.setColor(myColor);
-                g2d.fillOval(myScreenX - 20, myScreenY - 20, 40, 40);
-            }
-
-            // 내 이펙트 (구버전)
-            drawMyEffects(g2d);
-            // 구조화된 SkillEffect (클래스 기반) 렌더링
-            skillEffects.drawSelf(g2d, myScreenX, myScreenY);
-
-            // 내 이름
-            g2d.setColor(Color.YELLOW);
-            g2d.setFont(new Font("Arial", Font.BOLD, 12));
-            FontMetrics fm = g2d.getFontMetrics();
-            int nameWidth = fm.stringWidth(playerName + " (You)");
-            g2d.drawString(playerName + " (You)", myScreenX - nameWidth / 2, myScreenY - 25);
-
-            // 내 HP 바 (플레이어 아래)
-            drawHealthBar(g2d, myScreenX, myScreenY + 25, myHP, myMaxHP);
-
-            // 조준선 그리기 (화면 좌표 기준)
-            drawAimLine(g2d);
-
-            // 5. 미사일 그리기 (화면 좌표로 변환)
-            g2d.setColor(Color.YELLOW);
-            for (Missile m : missiles) {
-                int mScreenX = m.x - cameraX;
-                int mScreenY = m.y - cameraY;
-                if (isOnScreen(mScreenX, mScreenY)) {
-                    g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
-                }
-            }
-
-            // 6. 설치된 오브젝트 그리기 (지뢰/터렛)
-            for (Map.Entry<Integer, PlacedObjectClient> entry : placedObjects.entrySet()) {
-                PlacedObjectClient obj = entry.getValue();
-                int objScreenX = obj.x - cameraX;
-                int objScreenY = obj.y - cameraY;
-
-                if (isOnScreen(objScreenX, objScreenY)) {
-                    // 타입별 색상 및 크기
-                    Color objColor;
-                    int size;
-                    String label;
-
-                    if ("tech_mine".equals(obj.type)) {
-                        objColor = obj.team == GameConstants.TEAM_RED ? new Color(200, 50, 50)
-                                : new Color(50, 100, 200);
-                        size = 16;
-                        label = "지뢰";
-                    } else if ("tech_turret".equals(obj.type)) {
-                        objColor = obj.team == GameConstants.TEAM_RED ? new Color(220, 80, 80)
-                                : new Color(80, 120, 220);
-                        size = 24;
-                        label = "터렛";
-                    } else {
-                        objColor = Color.GRAY;
-                        size = 20;
-                        label = "?";
-                    }
-
-                    // 오브젝트 본체 그리기 (사각형)
-                    g2d.setColor(objColor);
-                    g2d.fillRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-
-                    // 테두리
-                    g2d.setColor(obj.team == team ? Color.GREEN : Color.RED);
-                    g2d.setStroke(new BasicStroke(2f));
-                    g2d.drawRect(objScreenX - size / 2, objScreenY - size / 2, size, size);
-
-                    // HP 바 (오브젝트 위)
-                    int barWidth = 30;
-                    int barHeight = 4;
-                    int barY = objScreenY - size / 2 - 8;
-
-                    g2d.setColor(Color.DARK_GRAY);
-                    g2d.fillRect(objScreenX - barWidth / 2, barY, barWidth, barHeight);
-
-                    float hpPercent = (float) obj.hp / obj.maxHp;
-                    Color hpColor;
-                    if (hpPercent > 0.6f)
-                        hpColor = Color.GREEN;
-                    else if (hpPercent > 0.3f)
-                        hpColor = Color.YELLOW;
-                    else
-                        hpColor = Color.RED;
-
-                    g2d.setColor(hpColor);
-                    int currentBarWidth = (int) (barWidth * hpPercent);
-                    g2d.fillRect(objScreenX - barWidth / 2, barY, currentBarWidth, barHeight);
-
-                    // 타입 라벨 (오브젝트 아래)
-                    g2d.setFont(new Font("맑은 고딕", Font.BOLD, 10));
-                    g2d.setColor(Color.WHITE);
-                    FontMetrics objFm = g2d.getFontMetrics();
-                    int labelWidth = objFm.stringWidth(label);
-                    g2d.drawString(label, objScreenX - labelWidth / 2, objScreenY + size / 2 + 12);
-
-                    // HP 수치 표시
-                    String hpText = obj.hp + "/" + obj.maxHp;
-                    g2d.setFont(new Font("Arial", Font.PLAIN, 9));
-                    objFm = g2d.getFontMetrics();
-                    int hpWidth = objFm.stringWidth(hpText);
-                    g2d.setColor(new Color(255, 255, 255, 200));
-                    g2d.drawString(hpText, objScreenX - hpWidth / 2, barY - 2);
-                }
-            }
-
-            // ...existing code...
-
-            // === UI 요소는 항상 맨 마지막에 그리기 ===
-            // 미니맵 그리기 (우측 상단)
-            if (showMinimap) {
-                drawMinimap(g2d);
-            }
-
-            // HUD
-            drawHUD(g2d);
-
-            // 라운드 정보 및 중앙 메시지
-            drawRoundInfo(g2d);
-        }
-
-        private void drawRoundInfo(Graphics2D g) {
-            // 상단 점수판
-            int centerX = getWidth() / 2;
-            g.setColor(new Color(0, 0, 0, 150));
-            g.fillRect(centerX - 100, 0, 200, 40);
-
-            g.setFont(new Font("Arial", Font.BOLD, 24));
-            g.setColor(new Color(255, 100, 100));
-            g.drawString(String.valueOf(redWins), centerX - 60, 30);
-
-            g.setColor(Color.WHITE);
-            g.drawString(":", centerX, 28);
-
-            g.setColor(new Color(100, 150, 255));
-            g.drawString(String.valueOf(blueWins), centerX + 40, 30);
-
-            g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
-            g.setColor(Color.WHITE);
-            g.drawString("Round " + roundCount, centerX - 30, 55);
-
-            // 중앙 메시지 (카운트다운, 승패 등)
-            if (roundState == RoundState.WAITING) {
-                long remaining = Math.max(0, ROUND_READY_TIME - (System.currentTimeMillis() - roundStartTime));
-                int sec = (int) (remaining / 1000) + 1;
-                if (remaining > 0) {
-                    drawCenterText(g, "라운드 시작까지 " + sec + "초", 40, Color.YELLOW);
-                    drawCenterText(g, "캐릭터를 변경할 수 있습니다 (B키)", 20, Color.WHITE, 50);
-                }
-            } else if (!centerMessage.isEmpty() && System.currentTimeMillis() < centerMessageEndTime) {
-                drawCenterText(g, centerMessage, 40, Color.YELLOW);
-            }
-        }
-
-        private void drawCenterText(Graphics2D g, String text, int size, Color color) {
-            drawCenterText(g, text, size, color, 0);
-        }
-
-        private void drawCenterText(Graphics2D g, String text, int size, Color color, int yOffset) {
-            g.setFont(new Font("맑은 고딕", Font.BOLD, size));
-            FontMetrics fm = g.getFontMetrics();
-            int x = (getWidth() - fm.stringWidth(text)) / 2;
-            int y = (getHeight() / 2) + yOffset;
-
-            // 그림자
-            g.setColor(Color.BLACK);
-            g.drawString(text, x + 2, y + 2);
-
-            g.setColor(color);
-            g.drawString(text, x, y);
+            // RenderContext를 생성하여 GameRenderer에 전달
+            GameRenderer.RenderContext ctx = GamePanel.this.createRenderContext();
+            gameRenderer.render(g, ctx);
         }
     }
 
     /**
-     * 화면 내에 있는지 체크 (최적화용)
+     * GameRenderer에 전달할 RenderContext 생성
      */
-    private boolean isOnScreen(int screenX, int screenY) {
-        return screenX >= -50 && screenX <= GameConstants.GAME_WIDTH + 50 &&
-                screenY >= -50 && screenY <= GameConstants.GAME_HEIGHT + 50;
-    }
-
-    /**
-     * 조준선 그리기: 캐릭터 중심에서 마우스 방향으로 (화면 좌표 기준)
-     */
-    private void drawAimLine(Graphics2D g2d) {
-        int myScreenX = playerX - cameraX;
-        int myScreenY = playerY - cameraY;
-
-        int vx = mouseX - myScreenX;
-        int vy = mouseY - myScreenY;
-        if (vx == 0 && vy == 0)
-            return; // 마우스가 캐릭터 위치와 같으면 표시 안함
-
-        double len = Math.sqrt(vx * vx + vy * vy);
-        double nx = vx / len;
-        double ny = vy / len;
-
-        // 조준선 길이 (짧게 조정)
-        int lineLength = 50;
-        int endX = myScreenX + (int) (nx * lineLength);
-        int endY = myScreenY + (int) (ny * lineLength);
-
-        // 반투명 빨간색 선
-        g2d.setColor(new Color(255, 0, 0, 100));
-        Stroke oldStroke = g2d.getStroke();
-        g2d.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
-                1f, new float[] { 10f, 5f }, 0f)); // 점선
-        g2d.drawLine(myScreenX, myScreenY, endX, endY);
-        g2d.setStroke(oldStroke);
-
-        // 마우스 위치에 작은 크로스헤어
-        g2d.setColor(new Color(255, 255, 0, 150));
-        g2d.drawOval(mouseX - 4, mouseY - 4, 8, 8);
-        g2d.drawLine(mouseX - 6, mouseY, mouseX + 6, mouseY);
-        g2d.drawLine(mouseX, mouseY - 6, mouseX, mouseY + 6);
-    }
-
-    private void drawMyEffects(Graphics2D g2d) {
-        if (myEffects.isEmpty())
-            return;
-        int myScreenX = playerX - cameraX;
-        int myScreenY = playerY - cameraY;
-
-        for (ActiveEffect ef : myEffects) {
-            float progress = 1f - (ef.remaining / ef.duration);
-            int radius = 28 + (int) (Math.sin(progress * 6.28318) * 4);
-            int alpha = (int) (160 * (ef.remaining / ef.duration));
-            alpha = Math.max(40, Math.min(200, alpha));
-            g2d.setColor(new Color(ef.color.getRed(), ef.color.getGreen(), ef.color.getBlue(), alpha));
-            Stroke old = g2d.getStroke();
-            g2d.setStroke(new BasicStroke(3f));
-            g2d.drawOval(myScreenX - radius, myScreenY - radius, radius * 2, radius * 2);
-            g2d.setStroke(old);
-
-            // Piper 전용 화려한 효과 강화
-            if ("piper_mark".equalsIgnoreCase(ef.abilityId)) {
-                // 부드러운 시안 파동 링 두 겹
-                g2d.setColor(new Color(100, 220, 255, 90));
-                g2d.drawOval(myScreenX - radius - 6, myScreenY - radius - 6, (radius + 6) * 2, (radius + 6) * 2);
-                g2d.setColor(new Color(80, 200, 255, 60));
-                g2d.drawOval(myScreenX - radius - 12, myScreenY - radius - 12, (radius + 12) * 2,
-                        (radius + 12) * 2);
-            } else if ("piper_thermal".equalsIgnoreCase(ef.abilityId)) {
-                // 주황색 글로우와 회전 아크
-                double t = (ef.duration - ef.remaining);
-                int glowR = radius + 8;
-                g2d.setColor(new Color(255, 160, 40, 110));
-                g2d.setStroke(new BasicStroke(4f));
-                g2d.drawOval(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2);
-                // 회전 아크
-                g2d.setColor(new Color(255, 200, 80, 160));
-                int arcStart = (int) ((t * 180) % 360);
-                ((Graphics2D) g2d).setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2d.drawArc(myScreenX - glowR, myScreenY - glowR, glowR * 2, glowR * 2, arcStart, 60);
-            }
-        }
-    }
-
-    private void drawGrid(Graphics2D g) {
-        g.setColor(new Color(30, 35, 45));
-        for (int x = 0; x < getWidth(); x += 50) {
-            g.drawLine(x, 0, x, getHeight());
-        }
-        for (int y = 0; y < getHeight(); y += 50) {
-            g.drawLine(0, y, getWidth(), y);
-        }
-    }
-
-    /**
-     * 장애물 디버그 표시 (개발용)
-     */
-    private void drawObstacles(Graphics2D g2d) {
-        if (!debugObstacles)
-            return;
-        g2d.setColor(new Color(255, 0, 0, 100)); // 반투명 빨간색
-        for (Rectangle obs : obstacles) {
-            // 맵 좌표를 화면 좌표로 변환
-            int screenX = obs.x - cameraX;
-            int screenY = obs.y - cameraY;
-            g2d.fillRect(screenX, screenY, obs.width, obs.height);
-            g2d.setColor(new Color(255, 255, 0, 150));
-            g2d.drawRect(screenX, screenY, obs.width, obs.height);
-            g2d.setColor(new Color(255, 0, 0, 100));
-        }
-    }
-
-    /**
-     * 에어스트라이크 마커 메인 화면 표시
-     */
-    private void drawStrikeMarkersMain(Graphics2D g2d) {
-        if (strikeMarkers.isEmpty())
-            return;
-
-        for (StrikeMarker marker : strikeMarkers.values()) {
-            int screenX = marker.x - cameraX;
-            int screenY = marker.y - cameraY;
-
-            if (isOnScreen(screenX, screenY)) {
-                // 반투명 빨간 원 (경고 영역)
-                int radius = 120; // 서버 설정과 동일
-
-                // 펄싱 효과
-                long currentTime = System.currentTimeMillis();
-                float pulsePhase = (currentTime % 500) / 500f; // 0.5초 주기
-                int alpha = (int) (100 + 50 * Math.sin(pulsePhase * Math.PI * 2));
-
-                g2d.setColor(new Color(255, 0, 0, alpha));
-                g2d.fillOval(screenX - radius, screenY - radius, radius * 2, radius * 2);
-
-                // 테두리
-                g2d.setColor(new Color(255, 0, 0, 200));
-                g2d.setStroke(new BasicStroke(2f));
-                g2d.drawOval(screenX - radius, screenY - radius, radius * 2, radius * 2);
-
-                // 중앙 십자가
-                g2d.setColor(Color.YELLOW);
-                g2d.drawLine(screenX - 20, screenY, screenX + 20, screenY);
-                g2d.drawLine(screenX, screenY - 20, screenX, screenY + 20);
-
-                // 경고 텍스트
-                g2d.setColor(Color.WHITE);
-                g2d.setFont(new Font("Arial", Font.BOLD, 14));
-                String warning = "WARNING!";
-                FontMetrics fm = g2d.getFontMetrics();
-                g2d.drawString(warning, screenX - fm.stringWidth(warning) / 2, screenY - 10);
-            }
-        }
-    }
-
-    private void drawHealthBar(Graphics2D g, int x, int y, int hp, int maxHp) {
-        int barWidth = 40;
-        int barHeight = 5;
-
-        g.setColor(Color.DARK_GRAY);
-        g.fillRect(x - barWidth / 2, y, barWidth, barHeight);
-
-        g.setColor(Color.GREEN);
-        float ratio = (float) hp / Math.max(1, maxHp);
-        int currentWidth = (int) (barWidth * ratio);
-        g.fillRect(x - barWidth / 2, y, currentWidth, barHeight);
-    }
-
-    private void drawMinimap(Graphics2D g2d) {
-        // 미니맵 크기 및 위치 설정
-        int minimapWidth = 200;
-        int minimapHeight = 150;
-        // 캔버스 너비 기준으로 배치 (채팅 패널은 캔버스 밖에 있음)
-        int minimapX = canvas.getWidth() - minimapWidth - 20;
-        int minimapY = 20;
-
-        // 실제 맵 크기 사용
-        float scaleX = (float) minimapWidth / GamePanel.this.mapWidth;
-        float scaleY = (float) minimapHeight / GamePanel.this.mapHeight;
-
-        // 배경 또는 맵 이미지 그리기
-        if (mapImage != null) {
-            // 맵 이미지를 축소하여 배경으로 렌더링
-            g2d.drawImage(mapImage, minimapX, minimapY, minimapWidth, minimapHeight, null);
-        } else {
-            // 폴백: 어두운 배경 + 장애물 간단 렌더링
-            g2d.setColor(new Color(20, 20, 30, 200));
-            g2d.fillRect(minimapX, minimapY, minimapWidth, minimapHeight);
-            if (obstacles != null && !obstacles.isEmpty()) {
-                g2d.setColor(new Color(200, 60, 60, 180));
-                for (Rectangle obs : obstacles) {
-                    int ox = minimapX + Math.round(obs.x * scaleX);
-                    int oy = minimapY + Math.round(obs.y * scaleY);
-                    int ow = Math.max(1, Math.round(obs.width * scaleX));
-                    int oh = Math.max(1, Math.round(obs.height * scaleY));
-                    g2d.fillRect(ox, oy, ow, oh);
-                }
-            }
-        }
-
-        // 테두리
-        g2d.setColor(Color.WHITE);
-        g2d.drawRect(minimapX, minimapY, minimapWidth, minimapHeight);
-
-        // 현재 화면(카메라) 뷰포트 표시
-        int viewX = minimapX + Math.round(cameraX * scaleX);
-        int viewY = minimapY + Math.round(cameraY * scaleY);
-        int viewW = Math.max(1, Math.round(GameConstants.GAME_WIDTH * scaleX));
-        int viewH = Math.max(1, Math.round(GameConstants.GAME_HEIGHT * scaleY));
-        g2d.setColor(new Color(255, 255, 255, 120));
-        g2d.drawRect(viewX, viewY, viewW, viewH);
-
-        // 내 위치를 미니맵에 표시
-        int myMinimapX = minimapX + (int) (playerX * scaleX);
-        int myMinimapY = minimapY + (int) (playerY * scaleY);
-
-        // 내 캐릭터 (노란색, 조금 큰 점)
-        g2d.setColor(Color.YELLOW);
-        g2d.fillOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
-        g2d.setColor(Color.ORANGE);
-        g2d.drawOval(myMinimapX - 5, myMinimapY - 5, 10, 10);
-
-        // 시야 범위 원 표시 (반투명)
-        int visionRadius = (int) (VISION_RANGE * ((scaleX + scaleY) * 0.5f));
-        g2d.setColor(new Color(255, 255, 255, 30));
-        g2d.fillOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
-        g2d.setColor(new Color(255, 255, 255, 80));
-        g2d.drawOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
-
-        // 다른 플레이어들 표시
-        boolean thermalActive = (piperThermalRemaining > 0f || teamThermalRemaining > 0f);
-        boolean markActive = !thermalActive && (piperMarkRemaining > 0f || teamMarkRemaining > 0f);
-        int extendedRadius = (int) (VISION_RANGE * (markActive ? PIPER_MARK_RANGE_FACTOR : 1f));
-        synchronized (players) {
-            for (PlayerData pd : players.values()) {
-                int dx = pd.x - playerX;
-                int dy = pd.y - playerY;
-                double distance = Math.sqrt(dx * dx + dy * dy);
-
-                // 뷰포트 체크: 적이 현재 화면에 보이는지 확인
-                boolean inViewport = (pd.x >= cameraX && pd.x <= cameraX + canvas.getWidth() &&
-                        pd.y >= cameraY && pd.y <= cameraY + canvas.getHeight());
-
-                // Piper 스킬(열감지/마크)은 뷰포트 무시, 일반 시야만 뷰포트 체크
-                boolean shouldShow = false;
-                if (thermalActive) {
-                    // 열감지: 전체 맵에서 모든 적 표시 (뷰포트 무시)
-                    shouldShow = true;
-                } else if (markActive && distance <= extendedRadius) {
-                    // 마크: 확장된 범위 내 적 표시 (뷰포트 무시)
-                    shouldShow = true;
-                } else if (!markActive && !thermalActive && distance <= VISION_RANGE && inViewport) {
-                    // 일반 시야: 범위 내 + 화면에 보이는 적만
-                    shouldShow = true;
-                }
-
-                if (shouldShow) {
-                    int otherX = minimapX + (int) (pd.x * scaleX);
-                    int otherY = minimapY + (int) (pd.y * scaleY);
-                    if (thermalActive) {
-                        g2d.setColor(new Color(255, 180, 0));
-                        g2d.fillOval(otherX - PIPER_THERMAL_DOT_SIZE / 2, otherY - PIPER_THERMAL_DOT_SIZE / 2,
-                                PIPER_THERMAL_DOT_SIZE, PIPER_THERMAL_DOT_SIZE);
-                    } else {
-                        if (pd.team == GameConstants.TEAM_BLUE) {
-                            g2d.setColor(Color.BLUE);
-                        } else if (pd.team == GameConstants.TEAM_RED) {
-                            g2d.setColor(Color.RED);
-                        } else {
-                            g2d.setColor(Color.GRAY);
-                        }
-                        g2d.fillOval(otherX - 3, otherY - 3, 6, 6);
-                    }
-                }
-            }
-        }
-
-        // 에어스트라이크 마커 표시 (빨간 십자가)
-        for (Map.Entry<Integer, StrikeMarker> entry : strikeMarkers.entrySet()) {
-            StrikeMarker marker = entry.getValue();
-            int markerX = minimapX + (int) (marker.x * scaleX);
-            int markerY = minimapY + (int) (marker.y * scaleY);
-
-            // 빨간 펄싱 원 (경고 효과)
-            long currentTime = System.currentTimeMillis();
-            float pulsePhase = (currentTime % 1000) / 1000f; // 0~1 반복
-            int pulseAlpha = (int) (150 + 105 * Math.sin(pulsePhase * Math.PI * 2));
-            g2d.setColor(new Color(255, 0, 0, pulseAlpha));
-            g2d.fillOval(markerX - 8, markerY - 8, 16, 16);
-
-            // 빨간 십자가
-            g2d.setColor(new Color(255, 255, 0, 255));
-            g2d.setStroke(new BasicStroke(2f));
-            g2d.drawLine(markerX - 10, markerY, markerX + 10, markerY);
-            g2d.drawLine(markerX, markerY - 10, markerX, markerY + 10);
-
-            // 경고 텍스트
-            g2d.setFont(new Font("Arial", Font.BOLD, 9));
-            g2d.setColor(new Color(255, 255, 255, 255));
-            g2d.drawString("!", markerX - 3, markerY + 4);
-        }
-
-        // 미니맵 레이블
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 10));
-        g2d.drawString("MAP", minimapX + 5, minimapY + 12);
-    }
-
-    private void drawHUD(Graphics2D g) {
-        // ===== currentCharacterData null 체크 및 안전장치 =====
-        if (currentCharacterData == null) {
-            currentCharacterData = CharacterData.getById(selectedCharacter);
-            if (currentCharacterData == null) {
-                currentCharacterData = CharacterData.getById("raven"); // 폴백
-            }
-        }
+    private GameRenderer.RenderContext createRenderContext() {
+        GameRenderer.RenderContext ctx = new GameRenderer.RenderContext();
         
-        // 배경
-        g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(10, 10, 250, 160);
-
-        // 폰트 설정
-        g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
-        g.setColor(Color.WHITE);
-
-        int yPos = 30;
-        g.drawString("플레이어: " + playerName, 20, yPos);
-        yPos += 20;
-        g.drawString("팀: " + (team == GameConstants.TEAM_RED ? "RED" : "BLUE"), 20, yPos);
-        yPos += 20;
+        // 맵 정보
+        ctx.mapImage = this.mapImage;
+        ctx.mapWidth = this.mapWidth;
+        ctx.mapHeight = this.mapHeight;
+        ctx.cameraX = this.cameraX;
+        ctx.cameraY = this.cameraY;
+        ctx.obstacles = this.obstacles;
+        ctx.debugObstacles = this.debugObstacles;
         
-        // ===== 캐릭터 이름 항상 currentCharacterData에서 가져오기 =====
-        g.drawString("캐릭터: " + currentCharacterData.name, 20, yPos);
-        yPos += 20;
-
-        // ===== HP 바: 항상 최신 myHP/myMaxHP 사용 =====
-        g.drawString("HP: " + myHP + "/" + myMaxHP, 20, yPos);
-        drawHealthBar(g, 130, yPos - 12, myHP, myMaxHP);
-        yPos += 20;
-
-        // 킬/데스
-        g.setColor(new Color(255, 215, 0)); // 골드
-        g.drawString("Kills: " + kills + " / Deaths: " + deaths, 20, yPos);
-        yPos += 20;
-
-        // ===== 캐릭터 스탯 표시: currentCharacterData 기준 =====
-        g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
-        g.setColor(new Color(255, 200, 200));
-        g.drawString("최대HP: " + (int) currentCharacterData.health, 20, yPos);
-        yPos += 18;
-        g.setColor(new Color(200, 255, 200));
-        g.drawString("속도: " + String.format("%.1f", currentCharacterData.speed), 20, yPos);
-
-        // 스킬 HUD (화면 하단 중앙)
-        drawSkillHUD(g);
-
-        // 도움말
-        g.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
-        g.setColor(Color.YELLOW);
-        g.drawString("좌클릭: 기본공격 | E: 전술스킬 | R: 궁극기", 20, getHeight() - 40);
-        g.drawString("B키: 캐릭터 선택", 20, getHeight() - 20);
-    }
-
-    /**
-     * 스킬 UI 그리기 (화면 하단 중앙)
-     */
-    private void drawSkillHUD(Graphics2D g) {
-        if (abilities == null)
-            return;
-
-        int hudWidth = 400;
-        int hudHeight = 80;
-        int hudX = (getWidth() - hudWidth) / 2;
-        int hudY = getHeight() - hudHeight - 70;
-
-        // 배경
-        g.setColor(new Color(0, 0, 0, 180));
-        g.fillRoundRect(hudX, hudY, hudWidth, hudHeight, 10, 10);
-
-        // 각 스킬 박스 그리기
-        int skillWidth = 60;
-        int skillHeight = 60;
-        int skillGap = 20;
-        int startX = hudX + (hudWidth - (skillWidth * 3 + skillGap * 2)) / 2;
-        int skillY = hudY + 10;
-
-        String[] keyLabels = { "좌클릭", "E", "R" };
-        Color[] skillColors = {
-                new Color(100, 200, 100), // 기본공격 - 초록
-                new Color(100, 150, 255), // 전술스킬 - 파랑
-                new Color(255, 100, 100) // 궁극기 - 빨강
-        };
-
-        for (int i = 0; i < 3 && i < abilities.length; i++) {
-            Ability ability = abilities[i];
-            int skillX = startX + i * (skillWidth + skillGap);
-
-            // 스킬 박스 배경
-            if (ability.canUse()) {
-                g.setColor(skillColors[i]);
-            } else {
-                g.setColor(new Color(40, 40, 40));
-            }
-            g.fillRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
-
-            // 테두리 (Piper 활성화 시 컬러)
-            boolean piper = "piper".equalsIgnoreCase(selectedCharacter);
-            float remain = 0f;
-            Color activeBorder = Color.WHITE;
-            if (piper) {
-                if (i == 1)
-                    remain = Math.max(piperMarkRemaining, 0f);
-                else if (i == 2)
-                    remain = Math.max(piperThermalRemaining, 0f);
-                if (remain > 0f) {
-                    activeBorder = (i == 1) ? new Color(80, 200, 255) : new Color(255, 160, 40);
-                }
-            }
-            g.setColor(activeBorder);
-            g.setStroke(new BasicStroke((piper && remain > 0f) ? 3f : 2f));
-            g.drawRoundRect(skillX, skillY, skillWidth, skillHeight, 8, 8);
-
-            // 쿨타임 오버레이 (어둡게)
-            if (!ability.canUse()) {
-                float cooldownPercent = ability.getCooldownPercent();
-                int overlayHeight = (int) (skillHeight * cooldownPercent);
-                g.setColor(new Color(0, 0, 0, 160));
-                g.fillRoundRect(skillX, skillY + (skillHeight - overlayHeight),
-                        skillWidth, overlayHeight, 8, 8);
-
-                // 쿨타임 텍스트
-                g.setColor(Color.WHITE);
-                g.setFont(new Font("맑은 고딕", Font.BOLD, 16));
-                String cooldownText = String.format("%.1f", ability.getCurrentCooldown());
-                FontMetrics fm = g.getFontMetrics();
-                int textWidth = fm.stringWidth(cooldownText);
-                g.drawString(cooldownText,
-                        skillX + (skillWidth - textWidth) / 2,
-                        skillY + skillHeight / 2 + 6);
-            }
-
-            // 키 라벨
-            g.setColor(Color.YELLOW);
-            g.setFont(new Font("맑은 고딕", Font.BOLD, 10));
-            FontMetrics fm = g.getFontMetrics();
-            int labelWidth = fm.stringWidth(keyLabels[i]);
-            g.drawString(keyLabels[i],
-                    skillX + (skillWidth - labelWidth) / 2,
-                    skillY - 5);
-
-            // 스킬 이름 (박스 아래)
-            g.setColor(Color.WHITE);
-            g.setFont(new Font("맑은 고딕", Font.PLAIN, 10));
-            fm = g.getFontMetrics();
-            int nameWidth = fm.stringWidth(ability.getName());
-            g.drawString(ability.getName(),
-                    skillX + (skillWidth - nameWidth) / 2,
-                    skillY + skillHeight + 15);
-        }
-    }
-
-    /** 편집 모드 타일 오버레이 */
-    private void drawEditorOverlay(Graphics2D g2d) {
-        if (walkableGrid == null)
-            return;
-        // 반투명 레이어로 전체 walkable/unwalkable 시각화 (간단한 색)
-        int startCol = cameraX / TILE_SIZE;
-        int startRow = cameraY / TILE_SIZE;
-        int endCol = Math.min(gridCols - 1, (cameraX + GameConstants.GAME_WIDTH) / TILE_SIZE + 1);
-        int endRow = Math.min(gridRows - 1, (cameraY + GameConstants.GAME_HEIGHT) / TILE_SIZE + 1);
-
-        // 미니맵 영역 계산 (showMinimap이 true일 때만 제외)
-        Rectangle minimapRect = null;
-        if (showMinimap) {
-            int minimapWidth = 200;
-            int minimapHeight = 150;
-            // 캔버스 기준 좌표 사용
-            int minimapX = canvas.getWidth() - minimapWidth - 20;
-            int minimapY = 20;
-            minimapRect = new Rectangle(minimapX, minimapY, minimapWidth, minimapHeight);
-        }
-
-        for (int r = startRow; r <= endRow; r++) {
-            for (int c = startCol; c <= endCol; c++) {
-                boolean walkable = walkableGrid[r][c];
-                int px = c * TILE_SIZE - cameraX;
-                int py = r * TILE_SIZE - cameraY;
-
-                // 미니맵이 켜져있으면 미니맵 영역과 겹치는 타일 스킵
-                if (minimapRect != null) {
-                    Rectangle tileRect = new Rectangle(px, py, TILE_SIZE, TILE_SIZE);
-                    if (tileRect.intersects(minimapRect)) {
-                        continue;
-                    }
-                }
-
-                Color base = walkable ? new Color(0, 180, 0, 55) : new Color(180, 0, 0, 60);
-                if (isSpawnTile(redSpawnTiles, c, r)) {
-                    base = new Color(255, 60, 60, 120);
-                } else if (isSpawnTile(blueSpawnTiles, c, r)) {
-                    base = new Color(60, 120, 255, 120);
-                }
-                g2d.setColor(base);
-                g2d.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            }
-        }
-        // 호버 타일 강조
-        if (hoverCol >= 0 && hoverRow >= 0 && hoverCol < gridCols && hoverRow < gridRows) {
-            int hx = hoverCol * TILE_SIZE - cameraX;
-            int hy = hoverRow * TILE_SIZE - cameraY;
-            g2d.setColor(new Color(255, 255, 0, 120));
-            g2d.drawRect(hx, hy, TILE_SIZE - 1, TILE_SIZE - 1);
-        }
-        // 모드 안내 텍스트
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 12));
-        String modeName;
-        switch (editPaintMode) {
-            case 0 -> modeName = "이동 가능";
-            case 1 -> modeName = "이동 불가";
-            case 2 -> modeName = "RED 스폰";
-            case 3 -> modeName = "BLUE 스폰";
-            default -> modeName = "?";
-        }
-        g2d.drawString("[EDIT MODE] 1=Walk 2=Block 3=RedSpawn 4=BlueSpawn | 현재=" + modeName + " | 좌클릭/드래그 | F4 종료",
-                10, 20);
-        g2d.setFont(new Font("Arial", Font.PLAIN, 11));
-        g2d.drawString("저장: Ctrl+S / F5", 10, 35);
+        // 플레이어 정보
+        ctx.playerName = this.playerName;
+        ctx.team = this.team;
+        ctx.playerX = this.playerX;
+        ctx.playerY = this.playerY;
+        ctx.myDirection = this.myDirection;
+        ctx.myAnimations = this.myAnimations;
+        ctx.myHP = this.myHP;
+        ctx.myMaxHP = this.myMaxHP;
+        ctx.mouseX = this.mouseX;
+        ctx.mouseY = this.mouseY;
+        ctx.selectedCharacter = this.selectedCharacter;
+        ctx.currentCharacterData = this.currentCharacterData;
+        
+        // 게임 오브젝트
+        ctx.players = this.players;
+        ctx.missiles = this.missiles;
+        ctx.placedObjects = this.placedObjects;
+        ctx.strikeMarkers = this.strikeMarkers;
+        
+        // 이펙트
+        ctx.myEffects = this.myEffects;
+        ctx.skillEffects = this.skillEffects;
+        
+        // UI 상태
+        ctx.showMinimap = this.showMinimap;
+        ctx.editMode = this.editMode;
+        ctx.kills = this.kills;
+        ctx.deaths = this.deaths;
+        ctx.abilities = this.abilities;
+        
+        // 라운드 정보
+        ctx.redWins = this.redWins;
+        ctx.blueWins = this.blueWins;
+        ctx.roundCount = this.roundCount;
+        ctx.roundState = this.roundState;
+        ctx.roundStartTime = this.roundStartTime;
+        ctx.centerMessage = this.centerMessage;
+        ctx.centerMessageEndTime = this.centerMessageEndTime;
+        
+        // 파이퍼 스킬
+        ctx.piperMarkRemaining = this.piperMarkRemaining;
+        ctx.piperThermalRemaining = this.piperThermalRemaining;
+        ctx.teamMarkRemaining = this.teamMarkRemaining;
+        ctx.teamThermalRemaining = this.teamThermalRemaining;
+        
+        // 캔버스 크기
+        ctx.canvasWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        ctx.canvasHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        
+        // 에디터
+        ctx.walkableGrid = this.walkableGrid;
+        ctx.tileSize = TILE_SIZE;
+        ctx.gridCols = this.gridCols;
+        ctx.gridRows = this.gridRows;
+        
+        return ctx;
     }
 
     public GamePanel(String playerName, int team, Socket socket, DataOutputStream out, DataInputStream in,
@@ -1173,21 +469,26 @@ public class GamePanel extends JFrame implements KeyListener {
         this.networkClient = new NetworkClient(socket, out, in);
         this.networkClient.setOnMessageReceived(this::processGameMessage);
         
-        // GameRenderer 초기화
+        // GameRenderer 초기화 - 파라미터 없는 생성자 사용
         this.gameRenderer = new GameRenderer();
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
+        this.selectedCharacter = selectedChar;
+        this.currentCharacterData = CharacterData.getById(selectedChar);
         gameState.setSelectedCharacter(selectedChar);
-        gameState.setCurrentCharacterData(CharacterData.getById(selectedChar));
+        gameState.setCurrentCharacterData(this.currentCharacterData);
 
         // HP 초기화 (중요: 캐릭터별 MaxHP 적용)
-        int maxHp = (int) gameState.getCurrentCharacterData().health;
+        int maxHp = (int) this.currentCharacterData.health;
+        this.myMaxHP = maxHp;
+        this.myHP = maxHp;
         gameState.setMyMaxHP(maxHp);
         gameState.setMyHP(maxHp);
 
         // 스킬 초기화
-        gameState.setAbilities(CharacterData.createAbilities(selectedChar));
+        this.abilities = CharacterData.createAbilities(selectedChar);
+        gameState.setAbilities(this.abilities);
 
         // 맵 로드
         loadMap(currentMapName);
