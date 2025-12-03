@@ -15,15 +15,25 @@ import javax.swing.*;
 /**
  * 게임 패널 - 기존 디자인 유지하면서 간단한 로직
  * 예제 코드처럼 단순한 게임 화면
+ * 
+ * 리팩토링: GameState를 사용하여 게임 상태 관리 분리
  */
 public class GamePanel extends JFrame implements KeyListener {
 
-    private final String playerName;
-    private final int team;
+    // 게임 상태 관리 객체 (리팩토링)
+    private final GameState gameState;
+    
     private final Socket socket;
     private final DataOutputStream out;
     private final DataInputStream in;
+    
+    // 네트워크 통신 관리 (리팩토링)
+    private final NetworkClient networkClient;
 
+    // Backward compatibility - keep fields but sync with gameState
+    private final String playerName;
+    private final int team;
+    
     private javax.swing.Timer timer;
     private int playerX = 400;
     private int playerY = 300;
@@ -1144,22 +1154,34 @@ public class GamePanel extends JFrame implements KeyListener {
     public GamePanel(String playerName, int team, Socket socket, DataOutputStream out, DataInputStream in,
             String characterId) {
         super("FPS Game - " + playerName);
+        
+        // Backward compatibility
         this.playerName = playerName;
         this.team = team;
+        
+        // GameState 초기화
+        this.gameState = new GameState(playerName, team);
+        
         this.socket = socket;
         this.out = out;
         this.in = in;
+        
+        // NetworkClient 초기화
+        this.networkClient = new NetworkClient(socket, out, in);
+        this.networkClient.setOnMessageReceived(this::processGameMessage);
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
-        this.selectedCharacter = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
-        this.currentCharacterData = CharacterData.getById(selectedCharacter);
+        String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
+        gameState.setSelectedCharacter(selectedChar);
+        gameState.setCurrentCharacterData(CharacterData.getById(selectedChar));
 
         // HP 초기화 (중요: 캐릭터별 MaxHP 적용)
-        this.myMaxHP = (int) currentCharacterData.health;
-        this.myHP = this.myMaxHP;
+        int maxHp = (int) gameState.getCurrentCharacterData().health;
+        gameState.setMyMaxHP(maxHp);
+        gameState.setMyHP(maxHp);
 
         // 스킬 초기화
-        this.abilities = CharacterData.createAbilities(selectedCharacter);
+        gameState.setAbilities(CharacterData.createAbilities(selectedChar));
 
         // 맵 로드
         loadMap(currentMapName);
@@ -1313,13 +1335,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private void sendChatMessage() {
         String message = chatInput.getText().trim();
         if (!message.isEmpty() && out != null) {
-            try {
-                // 서버로 전송 (로컬 에코 제거 - 서버 응답만 표시)
-                out.writeUTF("CHAT:" + message);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("채팅 전송 실패");
-            }
+            networkClient.sendChat(message);
             chatInput.setText("");
         }
         // 채팅 전송 후 게임 캔버스로 포커스 복귀
@@ -1917,8 +1933,8 @@ public class GamePanel extends JFrame implements KeyListener {
         });
         timer.start();
 
-        // 서버 메시지 수신 스레드
-        new Thread(this::receiveGameUpdates).start();
+        // 서버 메시지 수신 스레드 (NetworkClient로 위임)
+        networkClient.startReceiving();
     }
 
     private void updateGame() {
@@ -2271,12 +2287,7 @@ public class GamePanel extends JFrame implements KeyListener {
                             if (dist < 30) {
                                 it.remove();
                                 // 서버에 오브젝트 피격 보고
-                                try {
-                                    out.writeUTF("HIT_OBJ:" + obj.id);
-                                    out.flush();
-                                } catch (IOException ex) {
-                                    appendChatMessage("[네트워크] 오브젝트 피격 전송 실패");
-                                }
+                                networkClient.sendHitReport("HIT_OBJ:" + obj.id);
                                 break;
                             }
                         }
@@ -2293,16 +2304,10 @@ public class GamePanel extends JFrame implements KeyListener {
                 double dist = Math.sqrt(Math.pow(m.x - playerX, 2) + Math.pow(m.y - playerY, 2));
                 if (dist < 20) {
                     enemyIt.remove();
-                    try {
-                        if (m.owner != null) {
-                            out.writeUTF("HITME:" + m.owner);
-                        } else {
-                            out.writeUTF("DEATH");
-                        }
-                        out.flush();
-                    } catch (IOException ex) {
-                        System.err.println("[ERROR] Failed to send DEATH message");
-                        ex.printStackTrace(System.err);
+                    if (m.owner != null) {
+                        networkClient.sendHitReport("HITME:" + m.owner);
+                    } else {
+                        networkClient.sendHitReport("DEATH");
                     }
                     break;
                 }
@@ -2341,12 +2346,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
     private void sendPosition() {
         if (out != null) {
-            try {
-                out.writeUTF("POS:" + playerX + "," + playerY + "," + myDirection);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("[에러] 위치 전송 실패: " + ex.getMessage());
-            }
+            networkClient.sendPosition(playerX, playerY, myDirection);
         }
     }
 
@@ -2382,17 +2382,6 @@ public class GamePanel extends JFrame implements KeyListener {
         // 총구 섬광 이펙트 (로컬) - 발사 방향 각도 기반 단발 섬광
         double angle = Math.atan2(ny, nx);
         skillEffects.addSelf(new MuzzleFlashEffect(angle));
-    }
-
-    private void receiveGameUpdates() {
-        try {
-            String message;
-            while ((message = in.readUTF()) != null) {
-                processGameMessage(message);
-            }
-        } catch (IOException ex) {
-            System.out.println("서버와의 연결이 끊어졌습니다.");
-        }
     }
 
     private void processGameMessage(String message) {
@@ -3491,20 +3480,15 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     private void sendSkillUse(int skillIndex, String skillType, int targetX, int targetY) {
         if (out != null) {
-            try {
-                // abilityId,type,duration[,x,y]
-                Ability ability = (abilities != null && skillIndex < abilities.length) ? abilities[skillIndex] : null;
-                float dur = (ability != null) ? ability.getActiveDuration() : 0f;
-                String abilityId = (ability != null) ? ability.id : ("skill" + skillIndex);
-                String msg = "SKILL:" + abilityId + "," + skillType + "," + dur;
-                if (targetX >= 0 && targetY >= 0) {
-                    msg += "," + targetX + "," + targetY;
-                }
-                out.writeUTF(msg);
-                out.flush();
-            } catch (IOException ex) {
-                appendChatMessage("스킬 전송 실패: " + ex.getMessage());
+            // abilityId,type,duration[,x,y]
+            Ability ability = (abilities != null && skillIndex < abilities.length) ? abilities[skillIndex] : null;
+            float dur = (ability != null) ? ability.getActiveDuration() : 0f;
+            String abilityId = (ability != null) ? ability.id : ("skill" + skillIndex);
+            String msg = abilityId + "," + skillType + "," + dur;
+            if (targetX >= 0 && targetY >= 0) {
+                msg += "," + targetX + "," + targetY;
             }
+            networkClient.sendSkillUse(msg);
         }
     }
 
@@ -3582,16 +3566,8 @@ public class GamePanel extends JFrame implements KeyListener {
 
             // 서버에 캐릭터 변경 알림
             if (out != null) {
-                try {
-                    out.writeUTF("CHARACTER_SELECT:" + selectedCharacter);
-                    out.flush();
-                    System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
-                } catch (IOException ex) {
-                    System.err.println("[ERROR] Failed to send CHARACTER_SELECT message");
-                    ex.printStackTrace(System.err);
-                    // 실패 시 플래그 되돌림
-                    hasChangedCharacterInRound = false;
-                }
+                networkClient.sendCharacterSelect(selectedCharacter);
+                System.out.println("[Client] Character change request sent: " + selectedCharacter + " at " + elapsed + "ms");
             }
 
             appendChatMessage("캐릭터를 " + currentCharacterData.name + "으로 변경했습니다.");
