@@ -107,16 +107,6 @@ public class GamePanel extends JFrame implements KeyListener {
     // 미니맵 표시 여부
     private boolean showMinimap = true;
 
-    // 시야 범위 (화면 크기 기반 - 화면에 보이는 범위)
-    // 대각선 거리의 절반을 시야로 사용 (화면 중앙 기준)
-    private static final int VISION_RANGE = (int) (Math.sqrt(
-            GameConstants.GAME_WIDTH * GameConstants.GAME_WIDTH +
-                    GameConstants.GAME_HEIGHT * GameConstants.GAME_HEIGHT)
-            / 2);
-    // Piper 마킹 시 시야 배율 (기본보다 넓지만 전체는 아님)
-    private static final float PIPER_MARK_RANGE_FACTOR = 1.7f;
-    private static final int PIPER_THERMAL_DOT_SIZE = 10; // 열감지 시 점 크기 증가
-
     // 맵 시스템
     private java.awt.image.BufferedImage mapImage; // 맵 배경 이미지
     private int mapWidth = 3200; // 맵 전체 크기 (넓은 맵, 화면의 4배)
@@ -128,6 +118,12 @@ public class GamePanel extends JFrame implements KeyListener {
     private static final int TILE_SIZE = 32;
     private boolean[][] walkableGrid; // true = 이동 가능
     private int gridCols, gridRows;
+    
+    // UI 상수
+    private static final int MINIMAP_WIDTH = 200;
+    private static final int MINIMAP_HEIGHT = 150;
+    private static final int UI_MARGIN = 20;
+    public static final int CHAT_PANEL_WIDTH = 250;
     private Rectangle redSpawnZone, blueSpawnZone; // 팀 스폰 구역
     // 스폰 타일 원본 목록 (랜덤 스폰을 타일 단위로 정확히 하도록 유지)
     private final java.util.List<int[]> redSpawnTiles = new ArrayList<>();
@@ -169,7 +165,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 버프 상태 (gen_aura 등)
     float moveSpeedMultiplier = 1.0f;
-    float attackSpeedMultiplier = 1.0f;
+    float attackSpeedMultiplier = 1.0f; // TODO: 공격 속도 버프 미구현
 
     // 라운드 시스템
     public enum RoundState {
@@ -181,7 +177,6 @@ public class GamePanel extends JFrame implements KeyListener {
     int redWins = 0;
     int blueWins = 0;
     long roundStartTime = 0;
-    private static final int MAX_ROUNDS = 3; // 3판 2선승
     public static final int ROUND_READY_TIME = 10000; // 10초 대기
     String centerMessage = "";
     long centerMessageEndTime = 0;
@@ -289,24 +284,21 @@ public class GamePanel extends JFrame implements KeyListener {
                 @Override
                 public void mousePressed(MouseEvent e) {
                     // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
-                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
-                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
-                    int scaledMouseX = (int) (e.getX() / scaleX);
-                    int scaledMouseY = (int) (e.getY() / scaleY);
+                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    int scaledMouseX = scaled.x;
+                    int scaledMouseY = scaled.y;
                     
                     // 미니맵 타겟팅 모드: General 에어스트라이크
                     if (awaitingMinimapTarget && e.getButton() == MouseEvent.BUTTON1) {
                         // 미니맵 영역 체크 (고정 해상도 기준)
-                        int minimapWidth = 200;
-                        int minimapHeight = 150;
-                        int minimapX = GameConstants.GAME_WIDTH - minimapWidth - 20;
-                        int minimapY = 20;
+                        int minimapX = GameConstants.GAME_WIDTH - MINIMAP_WIDTH - UI_MARGIN;
+                        int minimapY = UI_MARGIN;
 
-                        if (scaledMouseX >= minimapX && scaledMouseX <= minimapX + minimapWidth &&
-                                scaledMouseY >= minimapY && scaledMouseY <= minimapY + minimapHeight) {
+                        if (scaledMouseX >= minimapX && scaledMouseX <= minimapX + MINIMAP_WIDTH &&
+                                scaledMouseY >= minimapY && scaledMouseY <= minimapY + MINIMAP_HEIGHT) {
                             // 미니맵 좌표를 맵 좌표로 변환
-                            float mapScaleX = (float) minimapWidth / mapWidth;
-                            float mapScaleY = (float) minimapHeight / mapHeight;
+                            float mapScaleX = (float) MINIMAP_WIDTH / mapWidth;
+                            float mapScaleY = (float) MINIMAP_HEIGHT / mapHeight;
                             int targetMapX = (int) ((scaledMouseX - minimapX) / mapScaleX);
                             int targetMapY = (int) ((scaledMouseY - minimapY) / mapScaleY);
 
@@ -351,10 +343,9 @@ public class GamePanel extends JFrame implements KeyListener {
                 @Override
                 public void mouseMoved(MouseEvent e) {
                     // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
-                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
-                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
-                    mouseX = (int) (e.getX() / scaleX);
-                    mouseY = (int) (e.getY() / scaleY);
+                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    mouseX = scaled.x;
+                    mouseY = scaled.y;
                     if (editMode)
                         updateHoverTile(mouseX + cameraX, mouseY + cameraY);
                 }
@@ -362,10 +353,9 @@ public class GamePanel extends JFrame implements KeyListener {
                 @Override
                 public void mouseDragged(MouseEvent e) {
                     // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
-                    double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
-                    double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
-                    mouseX = (int) (e.getX() / scaleX);
-                    mouseY = (int) (e.getY() / scaleY);
+                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    mouseX = scaled.x;
+                    mouseY = scaled.y;
                     if (editMode) {
                         int mapX = mouseX + cameraX;
                         int mapY = mouseY + cameraY;
@@ -552,7 +542,7 @@ public class GamePanel extends JFrame implements KeyListener {
 
         // 채팅 패널 (오른쪽)
         JPanel chatPanel = new JPanel(new BorderLayout());
-        chatPanel.setPreferredSize(new Dimension(250, 800)); // 창 높이에 맞춤
+        chatPanel.setPreferredSize(new Dimension(CHAT_PANEL_WIDTH, 800)); // 창 높이에 맞춤
         chatPanel.setBackground(new Color(32, 34, 37));
 
         // 채팅 영역
@@ -700,7 +690,7 @@ public class GamePanel extends JFrame implements KeyListener {
             } else {
                 appendChatMessage("[시스템] 맵 파일 없음: " + mapFile.getAbsolutePath());
             }
-        } catch (Exception e) {
+        } catch (java.io.IOException e) {
             appendChatMessage("[시스템] 맵 로드 에러: " + e.getMessage());
             // 폴백: 기본 크기 유지
         }
@@ -1107,6 +1097,20 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
+    // ==================== 유틸리티 메서드 ====================
+    
+    /**
+     * 화면 좌표를 스케일 보정된 게임 좌표로 변환
+     */
+    private java.awt.Point scaleMouseCoordinates(int screenX, int screenY) {
+        double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
+        double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
+        return new java.awt.Point(
+            (int) (screenX / scaleX),
+            (int) (screenY / scaleY)
+        );
+    }
+    
     /**
      * 맵 이미지 픽셀 분석으로 장애물 자동 추출
      * - 밝은 회색(길) + 스폰 지역만 이동 가능
@@ -2002,7 +2006,7 @@ public class GamePanel extends JFrame implements KeyListener {
             bw.write(generateEditedMapJson());
             bw.flush();
             appendChatMessage("[에디터] 저장 완료: " + outFile.getPath());
-        } catch (Exception ex) {
+        } catch (java.io.IOException ex) {
             appendChatMessage("[에디터] 저장 실패: " + ex.getMessage());
         }
     }

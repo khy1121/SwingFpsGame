@@ -16,24 +16,24 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class GameServer {
 
-    private ServerSocket serverSocket;
-    private Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
+    private final ServerSocket serverSocket;
+    private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private boolean running = true;
 
     // 설치형 오브젝트 (지뢰, 터렛 등)
-    private Map<Integer, PlacedObject> placedObjects = new ConcurrentHashMap<>();
-    private AtomicInteger nextPlacedObjectId = new AtomicInteger(1);
+    private final Map<Integer, PlacedObject> placedObjects = new ConcurrentHashMap<>();
+    private final AtomicInteger nextPlacedObjectId = new AtomicInteger(1);
 
-    private Timer turretAttackTimer;
+    private final Timer turretAttackTimer;
     private static final int TURRET_RANGE = 180;
     private static final int TURRET_ATTACK_INTERVAL = 900; // ms
 
     // 활성 오라 (gen_aura)
-    private Map<String, ActiveAura> activeAuras = new ConcurrentHashMap<>();
+    private final Map<String, ActiveAura> activeAuras = new ConcurrentHashMap<>();
 
     // 에어스트라이크 (gen_strike)
-    private Map<Integer, ScheduledStrike> scheduledStrikes = new ConcurrentHashMap<>();
-    private AtomicInteger nextStrikeId = new AtomicInteger(1);
+    private final Map<Integer, ScheduledStrike> scheduledStrikes = new ConcurrentHashMap<>();
+    private final AtomicInteger nextStrikeId = new AtomicInteger(1);
 
     // 라운드 시스템
     private int roundCount = 0;
@@ -220,7 +220,8 @@ public class GameServer {
                     socket.setKeepAlive(true);
                     socket.setSendBufferSize(64 * 1024);
                     socket.setReceiveBufferSize(64 * 1024);
-                } catch (Exception ignore) {
+                } catch (java.net.SocketException ignore) {
+                    // 소켓 옵션 설정 실패 시 무시하고 계속
                 }
                 out = new DataOutputStream(socket.getOutputStream());
                 in = new DataInputStream(socket.getInputStream());
