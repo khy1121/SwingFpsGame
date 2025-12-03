@@ -45,6 +45,7 @@ public class SkillManager {
     private float ravenDashRemaining = 0f;
     private float ravenOverchargeRemaining = 0f;
     private float missileSpeedMultiplier = 1f;
+    private float attackSpeedMultiplier = 1f; // TODO: 공격 속도 버프 미구현
     
     private float piperMarkRemaining = 0f;
     private float piperThermalRemaining = 0f;
@@ -84,6 +85,9 @@ public class SkillManager {
     
     public float getMissileSpeedMultiplier() { return missileSpeedMultiplier; }
     public void setMissileSpeedMultiplier(float value) { this.missileSpeedMultiplier = value; }
+    
+    public float getAttackSpeedMultiplier() { return attackSpeedMultiplier; }
+    public void setAttackSpeedMultiplier(float value) { this.attackSpeedMultiplier = value; }
     
     public float getPiperMarkRemaining() { return piperMarkRemaining; }
     public void setPiperMarkRemaining(float value) { this.piperMarkRemaining = value; }

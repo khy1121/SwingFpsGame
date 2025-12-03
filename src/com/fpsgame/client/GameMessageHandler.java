@@ -364,7 +364,7 @@ public class GameMessageHandler {
             float moveMulti = Float.parseFloat(bd[1]);
             float attackMulti = Float.parseFloat(bd[2]);
             gamePanel.moveSpeedMultiplier = moveMulti;
-            gamePanel.attackSpeedMultiplier = attackMulti;
+            gamePanel.getSkillManager().setAttackSpeedMultiplier(attackMulti);
             if (moveMulti > 1.0f || attackMulti > 1.0f) {
                 gamePanel.appendChatMessage("[버프] " + buffType + " 활성화!");
             }
@@ -375,7 +375,7 @@ public class GameMessageHandler {
         // 형식: abilityId
         if (data.equals("gen_aura")) {
             gamePanel.moveSpeedMultiplier = 1.0f;
-            gamePanel.attackSpeedMultiplier = 1.0f;
+            gamePanel.getSkillManager().setAttackSpeedMultiplier(1.0f);
             gamePanel.appendChatMessage("[버프] 장군의 오라 효과 종료");
             System.out.println("[UNBUFF] Aura buff removed");
         }

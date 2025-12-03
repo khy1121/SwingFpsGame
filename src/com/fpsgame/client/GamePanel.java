@@ -172,7 +172,6 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 버프 상태 (gen_aura 등)
     float moveSpeedMultiplier = 1.0f;
-    float attackSpeedMultiplier = 1.0f; // TODO: 공격 속도 버프 미구현
 
     // 라운드 시스템
     public enum RoundState {
@@ -485,9 +484,14 @@ public class GamePanel extends JFrame implements KeyListener {
         
         // Phase 2: 매니저 초기화
         this.mapManager = new MapManager(this::appendChatMessage);
+        // UIManager는 나중에 UI 초기화 시 사용 (콜백 불필요)
         this.uiManager = new UIManager(
-            msg -> { /* TODO: 채팅 전송 로직 */ },  // ChatSendCallback
-            action -> { /* TODO: 메뉴 액션 처리 */ }  // MenuActionCallback
+            msg -> {
+                if (!msg.isEmpty() && out != null) {
+                    networkClient.sendChat(msg);
+                }
+            },
+            this::handleMenuAction
         );
         this.gameLogicController = new GameLogicController(this::appendChatMessage);
 
@@ -660,6 +664,15 @@ public class GamePanel extends JFrame implements KeyListener {
         setJMenuBar(menuBar);
     }
 
+    // ==================== Manager Getters ====================
+    
+    public MapManager getMapManager() { return mapManager; }
+    public SkillManager getSkillManager() { return skillManager; }
+    public UIManager getUIManager() { return uiManager; }
+    public GameLogicController getGameLogicController() { return gameLogicController; }
+
+    // ==================== Chat Methods ====================
+
     private void sendChatMessage() {
         String message = chatInput.getText().trim();
         if (!message.isEmpty() && out != null) {
@@ -668,6 +681,49 @@ public class GamePanel extends JFrame implements KeyListener {
         }
         // 채팅 전송 후 게임 캔버스로 포커스 복귀
         canvas.requestFocusInWindow();
+    }
+    
+    /**
+     * UIManager 메뉴 액션 처리
+     */
+    private void handleMenuAction(String action) {
+        switch (action) {
+            case "CHARACTER_SELECT":
+                openCharacterSelect();
+                break;
+            case "EXIT":
+                disconnect();
+                System.exit(0);
+                break;
+            case "TOGGLE_MINIMAP":
+                showMinimap = !showMinimap;
+                break;
+            case "TOGGLE_DEBUG":
+                debugObstacles = !debugObstacles;
+                appendChatMessage("[디버그] 장애물 표시: " + debugObstacles);
+                break;
+            case "TOGGLE_EDIT":
+                editMode = !editMode;
+                appendChatMessage("[에디터] 편집 모드: " + editMode);
+                break;
+            case "NEXT_MAP":
+                cycleNextMap();
+                break;
+            case "SAVE_MAP":
+                saveEditedMap();
+                break;
+            case "REBUILD_OBSTACLES":
+                rebuildObstaclesFromWalkable();
+                break;
+            case "SHOW_CONTROLS":
+                uiManager.showControlsDialog(this);
+                break;
+            case "SHOW_ABOUT":
+                uiManager.showAboutDialog(this);
+                break;
+            default:
+                appendChatMessage("[시스템] 알 수 없는 메뉴 액션: " + action);
+        }
     }
 
     // 채팅/시스템 로그 스로틀링
@@ -823,6 +879,21 @@ public class GamePanel extends JFrame implements KeyListener {
         updateCamera();
         missiles.clear();
         sendPosition();
+    }
+    
+    /**
+     * 다음 맵으로 순환 전환
+     */
+    private void cycleNextMap() {
+        rebuildMapCycle();
+        if (mapCycle == null || mapCycle.isEmpty()) {
+            appendChatMessage("[시스템] 전환 가능한 맵이 없습니다.");
+        } else {
+            int idx = mapCycle.indexOf(currentMapName);
+            idx = (idx >= 0) ? (idx + 1) % mapCycle.size() : 0;
+            mapIndex = idx;
+            switchMap(mapCycle.get(idx));
+        }
     }
 
     /**
