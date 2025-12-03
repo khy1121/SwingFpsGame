@@ -3,7 +3,7 @@
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/client/GameConfig.java`
 - **목적**: 게임 설정(선택한 캐릭터)을 Properties 파일로 저장/로드
-- **라인 수**: ~80줄
+- **라인 수**: 75줄
 
 ## 🎯 주요 기능
 

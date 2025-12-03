@@ -5,9 +5,9 @@
 - **경로**: `src/com/fpsgame/client/effects/`
 - **역할**: 스킬 시각 효과 시스템
 - **구성 파일**: 총 26개
-  - `SkillEffect.java` (추상 기본 클래스, 54줄)
-  - `SkillEffectManager.java` (매니저, 100줄)
-  - 24개 개별 이펙트 클래스 (각 40-80줄)
+  - `SkillEffect.java` (추상 기본 클래스, 45줄)
+  - `SkillEffectManager.java` (매니저, 78줄)
+  - 24개 개별 이펙트 클래스 (각 14-46줄)
 - **주요 기능**: 스킬 사용 시 시각적 피드백, 수명 관리, 페이드아웃 애니메이션
 
 ---

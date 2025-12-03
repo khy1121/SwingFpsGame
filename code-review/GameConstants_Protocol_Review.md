@@ -5,13 +5,13 @@
 ### GameConstants.java
 - **경로**: `src/com/fpsgame/common/GameConstants.java`
 - **목적**: 게임 전반의 공통 상수 정의
-- **라인 수**: ~70줄
+- **라인 수**: 62줄
 - **패턴**: 유틸리티 클래스
 
 ### Protocol.java  
 - **경로**: `src/com/fpsgame/common/Protocol.java`
 - **목적**: 네트워크 프로토콜 및 메시지 타입 정의
-- **라인 수**: ~90줄
+- **라인 수**: 120줄
 - **패턴**: 프로토콜 정의 클래스
 
 ---
