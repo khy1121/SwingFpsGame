@@ -118,7 +118,7 @@ public class GameRenderer {
         if (ctx.strikeMarkers.isEmpty()) return;
         
         long currentTime = System.currentTimeMillis();
-        for (GamePanel.StrikeMarker marker : ctx.strikeMarkers.values()) {
+        for (GameObjectManager.StrikeMarker marker : ctx.strikeMarkers.values()) {
             int screenX = marker.x - ctx.cameraX;
             int screenY = marker.y - ctx.cameraY;
             
@@ -277,7 +277,7 @@ public class GameRenderer {
     
     private void drawMissiles(Graphics2D g2d, RenderContext ctx) {
         g2d.setColor(Color.YELLOW);
-        for (GamePanel.Missile m : ctx.missiles) {
+        for (GameObjectManager.Missile m : ctx.missiles) {
             int mScreenX = m.x - ctx.cameraX;
             int mScreenY = m.y - ctx.cameraY;
             if (isOnScreen(mScreenX, mScreenY, ctx)) {
@@ -287,8 +287,8 @@ public class GameRenderer {
     }
     
     private void drawPlacedObjects(Graphics2D g2d, RenderContext ctx) {
-        for (Map.Entry<Integer, GamePanel.PlacedObjectClient> entry : ctx.placedObjects.entrySet()) {
-            GamePanel.PlacedObjectClient obj = entry.getValue();
+        for (Map.Entry<Integer, GameObjectManager.PlacedObjectClient> entry : ctx.placedObjects.entrySet()) {
+            GameObjectManager.PlacedObjectClient obj = entry.getValue();
             int objScreenX = obj.x - ctx.cameraX;
             int objScreenY = obj.y - ctx.cameraY;
             
@@ -459,8 +459,8 @@ public class GameRenderer {
             }
         }
         
-        for (Map.Entry<Integer, GamePanel.StrikeMarker> entry : ctx.strikeMarkers.entrySet()) {
-            GamePanel.StrikeMarker marker = entry.getValue();
+        for (Map.Entry<Integer, GameObjectManager.StrikeMarker> entry : ctx.strikeMarkers.entrySet()) {
+            GameObjectManager.StrikeMarker marker = entry.getValue();
             int markerX = minimapX + (int) (marker.x * scaleX);
             int markerY = minimapY + (int) (marker.y * scaleY);
             
@@ -487,7 +487,7 @@ public class GameRenderer {
     
     private void drawHUD(Graphics2D g, RenderContext ctx) {
         g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(10, 10, 250, 160);
+        g.fillRect(10, 10, 250, 200);
         
         g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
         g.setColor(Color.WHITE);
@@ -514,6 +514,11 @@ public class GameRenderer {
         yPos += 18;
         g.setColor(new Color(200, 255, 200));
         g.drawString("속도: " + String.format("%.1f", ctx.currentCharacterData.speed), 20, yPos);
+        yPos += 18;
+        
+        // 디버그: 마우스 좌표 표시
+        g.setColor(Color.CYAN);
+        g.drawString("마우스: (" + ctx.mouseX + ", " + ctx.mouseY + ")", 20, yPos);
         
         drawSkillHUD(g, ctx);
         
@@ -734,9 +739,9 @@ public class GameRenderer {
         public Map<String, GamePanel.PlayerData> players;
         
         // 게임 오브젝트
-        public List<GamePanel.Missile> missiles;
-        public Map<Integer, GamePanel.PlacedObjectClient> placedObjects;
-        public Map<Integer, GamePanel.StrikeMarker> strikeMarkers;
+        public List<GameObjectManager.Missile> missiles;
+        public Map<Integer, GameObjectManager.PlacedObjectClient> placedObjects;
+        public Map<Integer, GameObjectManager.StrikeMarker> strikeMarkers;
         
         // 이펙트
         public List<GamePanel.ActiveEffect> myEffects;

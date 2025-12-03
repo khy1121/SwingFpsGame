@@ -42,6 +42,10 @@ public class GamePanel extends JFrame implements KeyListener {
     private final SkillManager skillManager;
     private final UIManager uiManager;
     private final GameLogicController gameLogicController;
+    private final CollisionManager collisionManager;
+    private final PlayerMovementController movementController;
+    private final SpawnManager spawnManager;
+    final GameObjectManager objectManager; // package-private for GameMessageHandler
 
     // Backward compatibility - keep fields but sync with gameState
     final String playerName;
@@ -101,8 +105,14 @@ public class GamePanel extends JFrame implements KeyListener {
     // 다른 플레이어들
     final Map<String, PlayerData> players = new HashMap<>();
 
-    // 미사일 리스트
-    final List<Missile> missiles = new ArrayList<>();
+    // 미사일 리스트 (objectManager에서 관리)
+    List<GameObjectManager.Missile> missiles;
+    
+    // 설치된 오브젝트 (objectManager에서 관리)
+    Map<Integer, GameObjectManager.PlacedObjectClient> placedObjects;
+    
+    // 스트라이크 마커 (objectManager에서 관리)
+    Map<Integer, GameObjectManager.StrikeMarker> strikeMarkers;
 
     // 게임 패널
     private GameCanvas canvas;
@@ -110,9 +120,11 @@ public class GamePanel extends JFrame implements KeyListener {
     // 마우스 위치 (조준선용)
     private int mouseX = 400;
     private int mouseY = 300;
+    private int rawMouseX = 400; // 원시 마우스 좌표 (패널 기준)
+    private int rawMouseY = 300;
 
     // 미니맵 표시 여부
-    private boolean showMinimap = true;
+    boolean showMinimap = true;
 
     // 맵 시스템
     private java.awt.image.BufferedImage mapImage; // 맵 배경 이미지
@@ -139,10 +151,10 @@ public class GamePanel extends JFrame implements KeyListener {
     // 장애물 시스템
     private final java.util.List<Rectangle> obstacles = new ArrayList<>();
     // 디버그 토글
-    private boolean debugObstacles = false; // F3로 토글
+    boolean debugObstacles = false; // F3로 토글
 
     // 맵 편집 모드 (타일 walkable 페인팅)
-    private boolean editMode = false; // F4 토글
+    boolean editMode = false; // F4 토글
     private int hoverCol = -1, hoverRow = -1; // 마우스 오버 타일
     // 드래그 페인트 상태: -1=없음, 0=unwalkable로 칠하기, 1=walkable로 칠하기
     private int paintState = -1;
@@ -160,12 +172,6 @@ public class GamePanel extends JFrame implements KeyListener {
     // 방향 (GameState에 없는 애니메이션용 필드)
     private int myDirection = 0; // 0:Down, 1:Up, 2:Left, 3:Right
     private SpriteAnimation[] myAnimations;
-
-    // 설치된 오브젝트 (지뢰, 터렛)
-    final Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
-
-    // 에어스트라이크 마커
-    final Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
 
     // General 궁극기: 미니맵 타겟팅 대기 상태
     private boolean awaitingMinimapTarget = false;
@@ -190,39 +196,6 @@ public class GamePanel extends JFrame implements KeyListener {
     // 캐릭터 선택 제한 관련 변수
     boolean hasChangedCharacterInRound = false;
     private static final long CHARACTER_CHANGE_TIME_LIMIT = 10000; // 10초
-
-    class PlacedObjectClient {
-        int id;
-        String type; // "tech_mine", "tech_turret"
-        int x, y;
-        int hp, maxHp;
-        String owner;
-        int team;
-
-        PlacedObjectClient(int id, String type, int x, int y, int hp, int maxHp, String owner, int team) {
-            this.id = id;
-            this.type = type;
-            this.x = x;
-            this.y = y;
-            this.hp = hp;
-            this.maxHp = maxHp;
-            this.owner = owner;
-            this.team = team;
-        }
-    }
-
-    class StrikeMarker {
-        int id;
-        int x, y;
-        long createdAt;
-
-        StrikeMarker(int id, int x, int y) {
-            this.id = id;
-            this.x = x;
-            this.y = y;
-            this.createdAt = System.currentTimeMillis();
-        }
-    }
 
     class PlayerData {
         int x, y;
@@ -257,21 +230,7 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    class Missile {
-        int x, y;
-        int dx, dy;
-        int team;
-        String owner; // 발사자 이름(킬 크레딧/피격 리포트용)
-
-        Missile(int x, int y, int dx, int dy, int team, String owner) {
-            this.x = x;
-            this.y = y;
-            this.dx = dx;
-            this.dy = dy;
-            this.team = team;
-            this.owner = owner;
-        }
-    }
+    // GamePanel 생성자 부분 - 밑에 위치
 
     class GameCanvas extends JPanel {
         public GameCanvas() {
@@ -289,8 +248,12 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    // 원시 좌표 저장
+                    rawMouseX = e.getX();
+                    rawMouseY = e.getY();
+                    
                     // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
-                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    java.awt.Point scaled = scaleMouseCoordinates(rawMouseX, rawMouseY);
                     int scaledMouseX = scaled.x;
                     int scaledMouseY = scaled.y;
                     
@@ -348,10 +311,15 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseMotionListener(new MouseMotionAdapter() {
                 @Override
                 public void mouseMoved(MouseEvent e) {
+                    // 원시 좌표 저장
+                    rawMouseX = e.getX();
+                    rawMouseY = e.getY();
+                    
                     // 스케일 보정: 실제 마우스 좌표를 고정 해상도 좌표로 변환
-                    java.awt.Point scaled = scaleMouseCoordinates(e.getX(), e.getY());
+                    java.awt.Point scaled = scaleMouseCoordinates(rawMouseX, rawMouseY);
                     mouseX = scaled.x;
                     mouseY = scaled.y;
+                    
                     if (editMode)
                         updateHoverTile(mouseX + cameraX, mouseY + cameraY);
                 }
@@ -405,8 +373,16 @@ public class GamePanel extends JFrame implements KeyListener {
         ctx.myAnimations = this.myAnimations;
         ctx.myHP = gameState.getMyHP();
         ctx.myMaxHP = gameState.getMyMaxHP();
-        ctx.mouseX = this.mouseX;
-        ctx.mouseY = this.mouseY;
+        
+        // 마우스 좌표: 렌더링과 동일한 방식으로 계산
+        // actualCanvasWidth/Height를 사용하여 렌더링 시점의 스케일과 일치
+        int actualWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        int actualHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        double scaleX = (double) actualWidth / GameConstants.GAME_WIDTH;
+        double scaleY = (double) actualHeight / GameConstants.GAME_HEIGHT;
+        ctx.mouseX = (int) (rawMouseX / scaleX);
+        ctx.mouseY = (int) (rawMouseY / scaleY);
+        
         ctx.selectedCharacter = gameState.getSelectedCharacter();
         ctx.currentCharacterData = gameState.getCurrentCharacterData();
         
@@ -491,9 +467,18 @@ public class GamePanel extends JFrame implements KeyListener {
                     networkClient.sendChat(msg);
                 }
             },
-            this::handleMenuAction
+            messageHandler::handleMenuAction
         );
         this.gameLogicController = new GameLogicController(this::appendChatMessage);
+        this.collisionManager = new CollisionManager(TILE_SIZE);
+        this.movementController = new PlayerMovementController(SPEED, collisionManager);
+        this.spawnManager = new SpawnManager();
+        this.objectManager = new GameObjectManager(collisionManager);
+        
+        // objectManager의 컬렉션 참조 연결
+        this.missiles = objectManager.getMissiles();
+        this.placedObjects = objectManager.getPlacedObjects();
+        this.strikeMarkers = objectManager.getStrikeMarkers();
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
@@ -534,12 +519,10 @@ public class GamePanel extends JFrame implements KeyListener {
      * BLUE 팀 = 오른쪽 하단 (파랑 스폰 지역)
      */
     private void setInitialSpawnPosition() {
-        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
-        if (tiles != null && !tiles.isEmpty()) {
-            java.util.Random rand = new java.util.Random();
-            int[] t = tiles.get(rand.nextInt(tiles.size()));
-            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
-            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
+        SpawnManager.SpawnPosition pos = spawnManager.getInitialSpawnPosition(team, mapWidth, mapHeight);
+        if (pos != null) {
+            playerX = pos.x;
+            playerY = pos.y;
         } else {
             appendChatMessage("[경고] 팀 스폰 타일이 비어 있습니다. 맵 JSON의 spawns." +
                     (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
@@ -686,45 +669,7 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * UIManager 메뉴 액션 처리
      */
-    private void handleMenuAction(String action) {
-        switch (action) {
-            case "CHARACTER_SELECT":
-                openCharacterSelect();
-                break;
-            case "EXIT":
-                disconnect();
-                System.exit(0);
-                break;
-            case "TOGGLE_MINIMAP":
-                showMinimap = !showMinimap;
-                break;
-            case "TOGGLE_DEBUG":
-                debugObstacles = !debugObstacles;
-                appendChatMessage("[디버그] 장애물 표시: " + debugObstacles);
-                break;
-            case "TOGGLE_EDIT":
-                editMode = !editMode;
-                appendChatMessage("[에디터] 편집 모드: " + editMode);
-                break;
-            case "NEXT_MAP":
-                cycleNextMap();
-                break;
-            case "SAVE_MAP":
-                saveEditedMap();
-                break;
-            case "REBUILD_OBSTACLES":
-                rebuildObstaclesFromWalkable();
-                break;
-            case "SHOW_CONTROLS":
-                uiManager.showControlsDialog(this);
-                break;
-            case "SHOW_ABOUT":
-                uiManager.showAboutDialog(this);
-                break;
-            default:
-                appendChatMessage("[시스템] 알 수 없는 메뉴 액션: " + action);
-        }
-    }
+    // 메뉴 액션은 GameMessageHandler에서 관리하도록 변경됨
 
     // 채팅/시스템 로그 스로틀링
     private String lastChatMessage = null;
@@ -786,9 +731,18 @@ public class GamePanel extends JFrame implements KeyListener {
         ensureSpawnZonesWalkable();
 
         // 4) JSON에 스폰 구역이 정의되지 않은 경우 에러 처리
-        if (redSpawnZone == null || blueSpawnZone == null) {
+        if (!spawnManager.hasValidSpawnZones()) {
             appendChatMessage("[경고] 스폰 구역이 JSON에 정의되지 않았습니다. 게임 시작 불가!");
         }
+        
+        // 5) CollisionManager 업데이트
+        collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
+        
+        // 6) MovementController 맵 크기 업데이트
+        movementController.updateMapSize(mapWidth, mapHeight);
+        
+        // 7) ObjectManager 맵 크기 업데이트
+        objectManager.updateMapSize(mapWidth, mapHeight);
     }
 
     /**
@@ -877,14 +831,14 @@ public class GamePanel extends JFrame implements KeyListener {
         loadMap(newMapName);
         setInitialSpawnPosition();
         updateCamera();
-        missiles.clear();
+        objectManager.clearMissiles();
         sendPosition();
     }
     
     /**
      * 다음 맵으로 순환 전환
      */
-    private void cycleNextMap() {
+    void cycleNextMap() {
         rebuildMapCycle();
         if (mapCycle == null || mapCycle.isEmpty()) {
             appendChatMessage("[시스템] 전환 가능한 맵이 없습니다.");
@@ -1028,6 +982,10 @@ public class GamePanel extends JFrame implements KeyListener {
         blueSpawnTiles.clear();
         redSpawnZone = extractSpawnZone(json, "red", redSpawnTiles);
         blueSpawnZone = extractSpawnZone(json, "blue", blueSpawnTiles);
+        
+        // SpawnManager에 스폰 정보 설정
+        spawnManager.setSpawnZones(redSpawnZone, blueSpawnZone);
+        spawnManager.setSpawnTiles(new ArrayList<>(redSpawnTiles), new ArrayList<>(blueSpawnTiles));
 
         // 스폰 구역은 항상 walkable로 강제
         ensureSpawnZonesWalkable();
@@ -1192,8 +1150,12 @@ public class GamePanel extends JFrame implements KeyListener {
      * 화면 좌표를 스케일 보정된 게임 좌표로 변환
      */
     private java.awt.Point scaleMouseCoordinates(int screenX, int screenY) {
-        double scaleX = (double) getWidth() / GameConstants.GAME_WIDTH;
-        double scaleY = (double) getHeight() / GameConstants.GAME_HEIGHT;
+        // canvas 크기를 사용 (렌더링과 동일한 기준)
+        int actualWidth = canvas != null ? canvas.getWidth() : GameConstants.GAME_WIDTH;
+        int actualHeight = canvas != null ? canvas.getHeight() : GameConstants.GAME_HEIGHT;
+        double scaleX = (double) actualWidth / GameConstants.GAME_WIDTH;
+        double scaleY = (double) actualHeight / GameConstants.GAME_HEIGHT;
+        
         return new java.awt.Point(
             (int) (screenX / scaleX),
             (int) (screenY / scaleY)
@@ -1506,29 +1468,33 @@ public class GamePanel extends JFrame implements KeyListener {
     private void updatePlayerPosition() {
         int oldX = playerX;
         int oldY = playerY;
-        int newX = playerX;
-        int newY = playerY;
 
         // 버프 적용된 이동 속도 계산
         int effectiveSpeed = (int) (SPEED * moveSpeedMultiplier);
+        
+        // 키 입력 배열 준비 (WASD와 화살표 키 통합)
+        boolean[] moveKeys = new boolean[256];
+        moveKeys['W'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_FORWARD)] || keys[KeyEvent.VK_UP];
+        moveKeys['w'] = moveKeys['W'];
+        moveKeys['S'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_BACKWARD)] || keys[KeyEvent.VK_DOWN];
+        moveKeys['s'] = moveKeys['S'];
+        moveKeys['A'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_LEFT)] || keys[KeyEvent.VK_LEFT];
+        moveKeys['a'] = moveKeys['A'];
+        moveKeys['D'] = keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_RIGHT)] || keys[KeyEvent.VK_RIGHT];
+        moveKeys['d'] = moveKeys['D'];
 
-        // 사용자 설정 키 바인딩 사용
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_FORWARD)] || keys[KeyEvent.VK_UP]) {
-            newY -= effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_BACKWARD)] || keys[KeyEvent.VK_DOWN]) {
-            newY += effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_LEFT)] || keys[KeyEvent.VK_LEFT]) {
-            newX -= effectiveSpeed;
-        }
-        if (keys[KeyBindingConfig.getKey(KeyBindingConfig.KEY_MOVE_RIGHT)] || keys[KeyEvent.VK_RIGHT]) {
-            newX += effectiveSpeed;
-        }
+        // 임시 이동 컨트롤러로 위치 계산 (속도 버프 적용)
+        PlayerMovementController tempController = new PlayerMovementController(effectiveSpeed, collisionManager);
+        tempController.updateMapSize(mapWidth, mapHeight);
+        PlayerMovementController.PlayerPosition newPos = new PlayerMovementController.PlayerPosition(playerX, playerY);
+        tempController.updatePlayerPosition(playerX, playerY, moveKeys, newPos);
+        
+        int newX = newPos.x;
+        int newY = newPos.y;
 
         // 라운드 대기 상태일 때 스폰 구역 이탈 방지
         if (roundState == RoundState.WAITING) {
-            Rectangle spawnZone = (team == GameConstants.TEAM_RED) ? redSpawnZone : blueSpawnZone;
+            Rectangle spawnZone = spawnManager.getSpawnZone(team);
             if (spawnZone != null) {
                 // 플레이어 중심점 기준 체크 및 클램핑
                 // 플레이어 크기 고려 (반경 20)
@@ -1551,24 +1517,9 @@ public class GamePanel extends JFrame implements KeyListener {
                 newY = Math.max(minY, Math.min(newY, maxY));
             }
         }
-
-        // 맵 경계 체크 (큰 맵)
-        newX = Math.max(20, Math.min(newX, mapWidth - 20));
-        newY = Math.max(20, Math.min(newY, mapHeight - 20));
-
-        // 장애물 충돌 체크
-        if (!checkCollisionWithObstacles(newX, newY)) {
-            playerX = newX;
-            playerY = newY;
-        } else {
-            // 장애물과 충돌 시 X축과 Y축 개별 체크
-            if (!checkCollisionWithObstacles(newX, oldY)) {
-                playerX = newX;
-            }
-            if (!checkCollisionWithObstacles(oldX, newY)) {
-                playerY = newY;
-            }
-        }
+        
+        playerX = newX;
+        playerY = newY;
 
         // 카메라 업데이트
         updateCamera();
@@ -1583,107 +1534,43 @@ public class GamePanel extends JFrame implements KeyListener {
      * 장애물 충돌 체크
      */
     private boolean checkCollisionWithObstacles(int x, int y) {
-        // 1) walkableGrid가 있으면 우선 사용: walkable이 아니면 충돌 간주
-        if (walkableGrid != null) {
-            if (!isPositionWalkable(x, y))
-                return true; // 이동 불가 = 충돌
+        // CollisionManager에 위임
+        if (walkableGrid != null && !collisionManager.isPositionWalkable(x, y)) {
+            return true;
         }
-        // 2) 장애물 사각형 교차 검사 (폴백 및 보강)
-        Rectangle playerBounds = new Rectangle(x - 20, y - 20, 40, 40);
-        for (Rectangle obs : obstacles) {
-            if (playerBounds.intersects(obs)) {
-                return true; // 충돌 발생
-            }
-        }
-        return false; // 충돌 없음
-    }
-
-    /**
-     * 플레이어 반경을 샘플링하여 해당 위치가 모두 walkable인지 확인
-     */
-    private boolean isPositionWalkable(int x, int y) {
-        int r = 18; // 캐릭터 반경 근사
-        int[][] samples = new int[][] {
-                { x, y }, { x - r, y }, { x + r, y }, { x, y - r }, { x, y + r },
-                { x - r, y - r }, { x + r, y - r }, { x - r, y + r }, { x + r, y + r }
-        };
-        for (int[] p : samples) {
-            int cx = Math.max(0, Math.min(p[0], mapWidth - 1));
-            int cy = Math.max(0, Math.min(p[1], mapHeight - 1));
-            int col = cx / TILE_SIZE;
-            int row = cy / TILE_SIZE;
-            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols)
-                return false;
-            if (!walkableGrid[row][col])
-                return false;
-        }
-        return true;
+        return collisionManager.checkCollisionWithObstacles(x, y);
     }
 
     /**
      * 카메라 업데이트 (플레이어 중심)
      */
     private void updateCamera() {
-        // 플레이어를 화면 중앙에 위치
-        cameraX = playerX - GameConstants.GAME_WIDTH / 2;
-        cameraY = playerY - GameConstants.GAME_HEIGHT / 2;
-
-        // 카메라가 맵 경계를 벗어나지 않도록 제한
-        cameraX = Math.max(0, Math.min(cameraX, mapWidth - GameConstants.GAME_WIDTH));
-        cameraY = Math.max(0, Math.min(cameraY, mapHeight - GameConstants.GAME_HEIGHT));
+        PlayerMovementController.CameraPosition camera = new PlayerMovementController.CameraPosition(cameraX, cameraY);
+        movementController.updateCamera(playerX, playerY, camera);
+        cameraX = camera.x;
+        cameraY = camera.y;
     }
 
     private void updateMissiles() {
-        Iterator<Missile> it = missiles.iterator();
-        while (it.hasNext()) {
-            Missile m = it.next();
-            m.x += m.dx;
-            m.y += m.dy;
-            // 맵 밖이면 제거 (전체 맵 기준)
-            if (m.x < 0 || m.x > mapWidth || m.y < 0 || m.y > mapHeight) {
-                it.remove();
-                continue;
-            }
-            // 벽 충돌: 타일 walkable 여부 + 장애물 Rect 교차
-            if (isMissileBlocked(m.x, m.y)) {
-                it.remove();
-                continue;
-            }
-        }
+        objectManager.updateMissiles();
     }
 
     private boolean isMissileBlocked(int x, int y) {
-        // 타일 기반
-        if (walkableGrid != null) {
-            int col = x / TILE_SIZE;
-            int row = y / TILE_SIZE;
-            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols)
-                return true;
-            if (!walkableGrid[row][col])
-                return true;
-        }
-        // 장애물 Rect (정밀)
-        Rectangle r = new Rectangle(x - 2, y - 2, 4, 4);
-        for (Rectangle obs : obstacles) {
-            if (r.intersects(obs))
-                return true;
-        }
-        return false;
+        return collisionManager.isMissileBlocked(x, y);
     }
 
     private void checkCollisions() {
         // 내 미사일과 다른 플레이어 충돌
-        Iterator<Missile> it = missiles.iterator();
+        Iterator<GameObjectManager.Missile> it = missiles.iterator();
         while (it.hasNext()) {
-            Missile m = it.next();
+            GameObjectManager.Missile m = it.next();
             if (m.team == team && m.owner != null && m.owner.equals(playerName)) {
                 // 적 플레이어와 충돌 체크
                 boolean hit = false;
                 for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
                     PlayerData p = entry.getValue();
                     if (p.team != team) {
-                        double dist = Math.sqrt(Math.pow(m.x - p.x, 2) + Math.pow(m.y - p.y, 2));
-                        if (dist < 20) {
+                        if (collisionManager.checkMissilePlayerCollision(m.x, m.y, p.x, p.y)) {
                             it.remove();
                             hit = true;
                             // 서버에 적 플레이어 피격 보고
@@ -1697,11 +1584,10 @@ public class GamePanel extends JFrame implements KeyListener {
 
                 // 설치된 오브젝트와 충돌 체크 (적 오브젝트만)
                 if (!hit) {
-                    for (Map.Entry<Integer, PlacedObjectClient> entry : placedObjects.entrySet()) {
-                        PlacedObjectClient obj = entry.getValue();
+                    for (Map.Entry<Integer, GameObjectManager.PlacedObjectClient> entry : placedObjects.entrySet()) {
+                        GameObjectManager.PlacedObjectClient obj = entry.getValue();
                         if (obj.team != team && obj.hp > 0) {
-                            double dist = Math.sqrt(Math.pow(m.x - obj.x, 2) + Math.pow(m.y - obj.y, 2));
-                            if (dist < 30) {
+                            if (collisionManager.checkMissileObjectCollision(m.x, m.y, obj.x, obj.y)) {
                                 it.remove();
                                 // 서버에 오브젝트 피격 보고
                                 networkClient.sendHitReport("HIT_OBJ:" + obj.id);
@@ -1715,9 +1601,9 @@ public class GamePanel extends JFrame implements KeyListener {
         }
 
         // 적 미사일과 내가 맞았는지 체크 (피해자 측 리포트)
-        Iterator<Missile> enemyIt = missiles.iterator();
+        Iterator<GameObjectManager.Missile> enemyIt = missiles.iterator();
         while (enemyIt.hasNext()) {
-            Missile m = enemyIt.next();
+            GameObjectManager.Missile m = enemyIt.next();
             if (m.team != team) {
                 double dist = Math.sqrt(Math.pow(m.x - playerX, 2) + Math.pow(m.y - playerY, 2));
                 if (dist < 20) {
@@ -1744,13 +1630,11 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     void respawn() {
-        // 반드시 지정된 스폰 타일 중에서만 랜덤 스폰
-        java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
-        if (tiles != null && !tiles.isEmpty()) {
-            java.util.Random rand = new java.util.Random();
-            int[] t = tiles.get(rand.nextInt(tiles.size()));
-            playerX = t[0] * TILE_SIZE + TILE_SIZE / 2;
-            playerY = t[1] * TILE_SIZE + TILE_SIZE / 2;
+        // SpawnManager로 스폰 위치 계산
+        SpawnManager.SpawnPosition pos = spawnManager.getRandomSpawnPosition(team);
+        if (pos != null) {
+            playerX = pos.x;
+            playerY = pos.y;
         } else {
             appendChatMessage("[경고] 팀 스폰 타일이 비어 있어 임시 위치에 리스폰합니다. 맵 JSON의 spawns." +
                     (team == GameConstants.TEAM_RED ? "red" : "blue") + ".tiles를 지정하세요.");
@@ -1795,8 +1679,8 @@ public class GamePanel extends JFrame implements KeyListener {
         double ny = (len > 0) ? (vy / len) : -1.0;
         int dx = (int) Math.round(nx * speed);
         int dy = (int) Math.round(ny * speed);
-        Missile missile = new Missile(sx, sy, dx, dy, team, playerName);
-        missiles.add(missile);
+        GameObjectManager.Missile missile = new GameObjectManager.Missile(sx, sy, dx, dy, team, playerName);
+        objectManager.addMissile(missile);
 
         if (out != null) {
             try {
@@ -1838,7 +1722,7 @@ public class GamePanel extends JFrame implements KeyListener {
         });
     }
 
-    private void disconnect() {
+    void disconnect() {
         try {
             if (timer != null)
                 timer.stop();
@@ -2065,7 +1949,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 (maxY - minY + 1) * TILE_SIZE);
     }
 
-    private void rebuildObstaclesFromWalkable() {
+    void rebuildObstaclesFromWalkable() {
         obstacles.clear();
         for (int r = 0; r < gridRows; r++) {
             for (int c = 0; c < gridCols; c++) {
@@ -2074,12 +1958,14 @@ public class GamePanel extends JFrame implements KeyListener {
                 }
             }
         }
+        // CollisionManager 업데이트
+        collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
     }
 
     /**
      * 편집된 맵을 JSON 파일로 저장 (assets/maps/<mapName>_edited.json)
      */
-    private void saveEditedMap() {
+    void saveEditedMap() {
         if (walkableGrid == null) {
             appendChatMessage("[에디터] 저장 실패: walkableGrid 없음");
             return;
@@ -2354,7 +2240,7 @@ public class GamePanel extends JFrame implements KeyListener {
         respawn(); // 전원 리스폰 위치로
     }
 
-    private void openCharacterSelect() {
+    void openCharacterSelect() {
         // 1. 시간 제한 체크 (10초) - 최우선으로 체크
         long now = System.currentTimeMillis();
         long elapsed = now - roundStartTime;

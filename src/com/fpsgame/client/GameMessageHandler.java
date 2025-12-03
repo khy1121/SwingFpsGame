@@ -25,10 +25,10 @@ public class GameMessageHandler {
     public void handleMessage(String message) {
         String[] parts = message.split(":", 2);
         if (parts.length < 2) return;
-        
+
         String command = parts[0];
         String data = parts[1];
-        
+
         switch (command) {
             case "WELCOME" -> handleWelcome(data);
             case "TEAM_ROSTER" -> handleTeamRoster(data);
@@ -55,7 +55,38 @@ public class GameMessageHandler {
             case "ROUND_START" -> handleRoundStart(data);
             case "GAME_OVER" -> handleGameOver(data);
             case "GAME_END" -> handleGameEnd(data);
+            case "MENU_ACTION" -> handleMenuAction(data);
             default -> System.out.println("[알 수 없는 명령어] " + command);
+        }
+    }
+
+    /**
+     * 메뉴 액션 처리 (GamePanel에서 분리)
+     * UIManager에서 발생한 메뉴 액션을 처리
+     * @param action 메뉴 액션 데이터
+     */
+    public void handleMenuAction(String action) {
+        switch (action) {
+            case "CHARACTER_SELECT" -> gamePanel.openCharacterSelect();
+            case "EXIT" -> {
+                gamePanel.disconnect();
+                System.exit(0);
+            }
+            case "TOGGLE_MINIMAP" -> gamePanel.showMinimap = !gamePanel.showMinimap;
+            case "TOGGLE_DEBUG" -> {
+                gamePanel.debugObstacles = !gamePanel.debugObstacles;
+                gamePanel.appendChatMessage("[디버그] 장애물 표시: " + gamePanel.debugObstacles);
+            }
+            case "TOGGLE_EDIT" -> {
+                gamePanel.editMode = !gamePanel.editMode;
+                gamePanel.appendChatMessage("[에디터] 편집 모드: " + gamePanel.editMode);
+            }
+            case "NEXT_MAP" -> gamePanel.cycleNextMap();
+            case "SAVE_MAP" -> gamePanel.saveEditedMap();
+            case "REBUILD_OBSTACLES" -> gamePanel.rebuildObstaclesFromWalkable();
+            case "SHOW_CONTROLS" -> gamePanel.getUIManager().showControlsDialog(gamePanel);
+            case "SHOW_ABOUT" -> gamePanel.getUIManager().showAboutDialog(gamePanel);
+            default -> gamePanel.appendChatMessage("[시스템] 알 수 없는 메뉴 액션: " + action);
         }
     }
     
@@ -318,7 +349,7 @@ public class GameMessageHandler {
             int dy = Integer.parseInt(md[3]);
             int mTeam = Integer.parseInt(md[4]);
             String owner = md[5];
-            gamePanel.missiles.add(gamePanel.new Missile(mx, my, dx, dy, mTeam, owner));
+            gamePanel.objectManager.addMissile(new GameObjectManager.Missile(mx, my, dx, dy, mTeam, owner));
         }
     }
     
@@ -343,15 +374,16 @@ public class GameMessageHandler {
             int maxHp = Integer.parseInt(od[5]);
             String ownerName = od[6];
             int team = Integer.parseInt(od[7]);
-            gamePanel.placedObjects.put(id, gamePanel.new PlacedObjectClient(id, objType, ox, oy, hp, maxHp, ownerName, team));
+            gamePanel.objectManager.putPlacedObject(id, new GameObjectManager.PlacedObjectClient(id, objType, ox, oy, hp, maxHp, ownerName, team));
         }
     }
     
     private void handleObjectDestroy(String data) {
         try {
             int id = Integer.parseInt(data);
-            GamePanel.PlacedObjectClient obj = gamePanel.placedObjects.remove(id);
+            GameObjectManager.PlacedObjectClient obj = gamePanel.objectManager.getPlacedObject(id);
             if (obj != null) {
+                gamePanel.objectManager.removePlacedObject(id);
                 gamePanel.appendChatMessage("[오브젝트] " + obj.type + " 파괴됨!");
             }
         } catch (NumberFormatException ignored) {}
@@ -390,7 +422,7 @@ public class GameMessageHandler {
             int objId = Integer.parseInt(objData[0]);
             int hp = Integer.parseInt(objData[1]);
             
-            GamePanel.PlacedObjectClient obj = gamePanel.placedObjects.get(objId);
+            GameObjectManager.PlacedObjectClient obj = gamePanel.objectManager.getPlacedObject(objId);
             if (obj != null) {
                 obj.hp = hp;
                 System.out.println("[OBJ_UPDATE] Object " + objId + " HP: " + hp);
@@ -406,7 +438,7 @@ public class GameMessageHandler {
             int strikeId = Integer.parseInt(strikeData[0]);
             int sx = Integer.parseInt(strikeData[1]);
             int sy = Integer.parseInt(strikeData[2]);
-            gamePanel.strikeMarkers.put(strikeId, gamePanel.new StrikeMarker(strikeId, sx, sy));
+            gamePanel.objectManager.addStrikeMarker(strikeId, new GameObjectManager.StrikeMarker(strikeId, sx, sy));
             gamePanel.appendChatMessage("[경고] 에어스트라이크 발동! (" + sx + ", " + sy + ")");
         }
     }
@@ -437,7 +469,7 @@ public class GameMessageHandler {
             String targetName = ts[3];
             String ownerName = ts[4];
             
-            GamePanel.PlacedObjectClient turret = gamePanel.placedObjects.get(turretId);
+            GameObjectManager.PlacedObjectClient turret = gamePanel.objectManager.getPlacedObject(turretId);
             if (turret != null) {
                 int sx = turret.x;
                 int sy = turret.y;
@@ -449,7 +481,7 @@ public class GameMessageHandler {
                     int missileVx = (int) (dx / distance * speed);
                     int missileVy = (int) (dy / distance * speed);
                     // 터렛 미사일은 TURRET: 접두사로 소유자 표시
-                    gamePanel.missiles.add(gamePanel.new Missile(sx, sy, missileVx, missileVy, 
+                    gamePanel.objectManager.addMissile(new GameObjectManager.Missile(sx, sy, missileVx, missileVy, 
                         turret.team, "TURRET:" + ownerName));
                     System.out.println("[TURRET_SHOOT] Turret #" + turretId + " (owner: " + ownerName + 
                         ") fired at " + targetName + " (" + tx + ", " + ty + ")");
