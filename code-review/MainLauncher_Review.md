@@ -2,205 +2,374 @@
 
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/client/MainLauncher.java`
-- **목적**: 게임 진입점 및 플레이어 이름 입력 UI
-- **라인 수**: 134줄
-- **역할**: 애플리케이션 시작 → 이름 입력 → 로비로 전환
+- **역할**: 게임 진입점 및 플레이어 이름 입력 화면
+- **라인 수**: 153줄
+- **UI 프레임워크**: Java Swing
+- **주요 기능**: 플레이어 이름 입력, 로비 진입, 게임 시작
+
+---
 
 ## 🎯 주요 기능
 
-### 1. 프로그램 진입점
+### 1. JFrame 기반 런처 창
 ```java
+public class MainLauncher extends JFrame {
+    /** 플레이어 이름 입력 필드 */
+    private JTextField nameField;
+    
+    /** 게임 시작 버튼 */
+    private JButton startButton;
+    
+    /** 게임 종료 버튼 */
+    private JButton exitButton;
+
+    public MainLauncher() {
+        super("FPS Game Launcher");
+        initUI();
+    }
+}
+```
+- **JFrame 상속**: Swing 윈도우 프레임
+- **500x350 크기**: 작고 간결한 런처 창
+- **중앙 배치**: `setLocationRelativeTo(null)` - 화면 중앙
+
+### 2. UI 레이아웃 (BorderLayout)
+```java
+private void initUI() {
+    setDefaultCloseOperation(EXIT_ON_CLOSE);
+    setSize(500, 350);
+    setLocationRelativeTo(null);
+    setLayout(new BorderLayout());
+    
+    // 레이아웃 조립
+    add(titlePanel, BorderLayout.NORTH);   // 상단: 타이틀
+    add(centerPanel, BorderLayout.CENTER); // 중앙: 이름 입력
+    add(buttonPanel, BorderLayout.SOUTH);  // 하단: 버튼들
+}
+```
+**3단 레이아웃**:
+```
+┌─────────────────────────────────┐
+│ NORTH: 타이틀 ("FPS 게임")       │
+├─────────────────────────────────┤
+│ CENTER: 이름 입력 필드            │
+│   [플레이어 이름: ___________]   │
+├─────────────────────────────────┤
+│ SOUTH: 버튼                      │
+│   [게임 시작]  [종료]            │
+└─────────────────────────────────┘
+```
+
+### 3. 한글 폰트 설정
+```java
+// 한글 폰트 설정
+Font koreanFont = new Font("맑은 고딕", Font.PLAIN, 14);     // 일반 텍스트
+Font koreanBold = new Font("맑은 고딕", Font.BOLD, 16);      // 라벨
+Font titleFont = new Font("맑은 고딕", Font.BOLD, 36);       // 타이틀
+```
+**윈도우 기본 폰트**:
+- **맑은 고딕**: Windows Vista 이후 기본 한글 폰트
+- **크기 구분**: 타이틀(36pt) > 라벨(16pt) > 일반(14pt)
+- **한글 깨짐 방지**: 명시적 폰트 지정
+
+### 4. 타이틀 패널 (어두운 배경)
+```java
+// 타이틀 패널
+JPanel titlePanel = new JPanel();
+titlePanel.setBackground(new Color(30, 40, 55)); // 어두운 남색
+titlePanel.setBorder(BorderFactory.createEmptyBorder(30, 20, 20, 20)); // 여백
+
+JLabel titleLabel = new JLabel("FPS 게임");
+titleLabel.setFont(titleFont); // 36pt 볼드
+titleLabel.setForeground(Color.WHITE); // 흰색 글자
+titlePanel.add(titleLabel);
+```
+**색상 조합**:
+- **배경**: RGB(30, 40, 55) - 어두운 남색
+- **글자**: 흰색 - 높은 대비
+- **여백**: 상30, 좌우20, 하20 픽셀
+
+### 5. 중앙 패널 (이름 입력)
+```java
+// 중앙 패널 - GridBagLayout
+JPanel centerPanel = new JPanel(new GridBagLayout());
+centerPanel.setBackground(new Color(40, 50, 65));
+GridBagConstraints gbc = new GridBagConstraints();
+gbc.insets = new Insets(10, 10, 10, 10); // 여백
+
+// 이름 라벨 (0, 0)
+gbc.gridx = 0;
+gbc.gridy = 0;
+JLabel nameLabel = new JLabel("플레이어 이름:");
+nameLabel.setForeground(Color.BLACK);
+nameLabel.setFont(koreanBold); // 16pt 볼드
+centerPanel.add(nameLabel, gbc);
+
+// 이름 입력 필드 (1, 0)
+gbc.gridx = 1;
+nameField = new JTextField(15); // 15자 너비
+nameField.setFont(koreanFont);
+centerPanel.add(nameField, gbc);
+```
+**GridBagLayout 사용 이유**:
+- **정렬 제어**: 라벨과 입력 필드를 깔끔하게 배치
+- **여백 설정**: `insets`로 요소 간 간격 조절
+
+### 6. 버튼 패널 (시작/종료)
+```java
+// 버튼 패널
+JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 20));
+buttonPanel.setBackground(new Color(40, 50, 65));
+
+// 시작 버튼
+startButton = new JButton("게임 시작");
+startButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+startButton.setPreferredSize(new Dimension(160, 45)); // 160x45 픽셀
+startButton.setBackground(new Color(76, 175, 80));    // 녹색 (Material Green)
+startButton.setForeground(Color.BLACK);
+startButton.setFocusPainted(false);                   // 포커스 테두리 제거
+startButton.addActionListener(e -> startGame());
+
+// 종료 버튼
+exitButton = new JButton("종료");
+exitButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+exitButton.setPreferredSize(new Dimension(160, 45));
+exitButton.setBackground(new Color(244, 67, 54));     // 빨간색 (Material Red)
+exitButton.setForeground(Color.BLACK);
+exitButton.setFocusPainted(false);
+exitButton.addActionListener(e -> System.exit(0));
+
+buttonPanel.add(startButton);
+buttonPanel.add(exitButton);
+```
+**Material Design 색상**:
+- **시작 버튼**: RGB(76, 175, 80) - Green 500
+- **종료 버튼**: RGB(244, 67, 54) - Red 500
+- **버튼 크기**: 160x45 픽셀 (일관된 크기)
+
+### 7. 게임 시작 처리
+```java
+/**
+ * 게임 시작 처리
+ */
+private void startGame() {
+    String playerName = nameField.getText().trim();
+    
+    // 이름 입력 검증
+    if (playerName.isEmpty()) {
+        JOptionPane.showMessageDialog(this,
+                "이름을 입력해주세요!",
+                "Error",
+                JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+
+    // 로비 프레임 열기
+    SwingUtilities.invokeLater(() -> {
+        LobbyFrame lobby = new LobbyFrame(playerName);
+        lobby.setVisible(true);
+        dispose(); // 런처 창 닫기
+    });
+}
+```
+**처리 단계**:
+1. **입력값 가져오기**: `nameField.getText().trim()`
+2. **검증**: 빈 문자열 체크
+3. **에러 다이얼로그**: `JOptionPane.showMessageDialog()`
+4. **로비 생성**: `new LobbyFrame(playerName)`
+5. **런처 닫기**: `dispose()`
+
+**EDT 사용**:
+- `SwingUtilities.invokeLater()`: Swing UI는 EDT에서만 변경 가능
+
+### 8. 프로그램 진입점
+```java
+/**
+ * 프로그램 진입점
+ */
 public static void main(String[] args) {
-    UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+    // 시스템 Look and Feel 적용
+    try {
+        javax.swing.UIManager.setLookAndFeel(
+            javax.swing.UIManager.getSystemLookAndFeelClassName()
+        );
+    } catch (Exception e) {
+        System.err.println("[MainLauncher] Failed to set Look and Feel");
+        e.printStackTrace(System.err);
+    }
+
+    // 런처 창 표시
     SwingUtilities.invokeLater(() -> {
         MainLauncher launcher = new MainLauncher();
         launcher.setVisible(true);
     });
 }
 ```
-- JVM이 가장 먼저 실행하는 메서드
-- Look and Feel 설정 후 UI 생성
+**Look and Feel**:
+- **시스템 기본**: Windows에서는 Windows 스타일, Mac에서는 Mac 스타일
+- **폴백**: 실패 시 기본 Metal L&F 사용
 
-### 2. 플레이어 이름 입력
+---
+
+## 💡 강점
+
+### 1. 간결한 UI
+- **3단 레이아웃**: 타이틀, 입력, 버튼 (명확한 구조)
+- **최소한의 요소**: 필요한 것만 표시 (이름 입력, 시작, 종료)
+- **적절한 크기**: 500x350 픽셀 (작지만 답답하지 않음)
+
+### 2. 한글 지원 완벽
 ```java
-private JTextField nameField;
-private void startGame() {
-    String playerName = nameField.getText().trim();
-    if (playerName.isEmpty()) {
-        JOptionPane.showMessageDialog(...);
-        return;
-    }
-    // 로비로 진입
+Font koreanFont = new Font("맑은 고딕", Font.PLAIN, 14);
+```
+- **한글 폰트 명시**: 깨짐 방지
+- **윈도우 기본 폰트**: 맑은 고딕 (Windows Vista+)
+
+### 3. Material Design 색상
+- **일관된 디자인**: Google Material Design 색상 팔레트
+- **시각적 피드백**: 녹색(시작) vs 빨간색(종료)
+
+### 4. 입력 검증
+```java
+if (playerName.isEmpty()) {
+    JOptionPane.showMessageDialog(this, "이름을 입력해주세요!", ...);
+    return;
 }
 ```
-- 텍스트 필드로 이름 입력
-- 빈 문자열 검증
+- **빈 문자열 체크**: 이름 없이 시작 방지
+- **trim() 사용**: 공백만 입력한 경우도 차단
 
-### 3. UI 초기화
-```java
-private void initUI() {
-    // 타이틀 패널
-    // 입력 패널
-    // 버튼 패널
-}
-```
-- BorderLayout으로 3개 영역 구성
-- 한글 폰트 적용
-
-## ✅ 장점
-
-### 1. **SwingUtilities.invokeLater 사용**
+### 5. EDT 준수
 ```java
 SwingUtilities.invokeLater(() -> {
     MainLauncher launcher = new MainLauncher();
     launcher.setVisible(true);
 });
 ```
-**효과**:
-- EDT(Event Dispatch Thread)에서 UI 생성
-- Thread-safety 보장
-- Swing 권장 패턴 준수
+- **스레드 안전**: Swing UI는 EDT에서만 변경
 
-### 2. **입력 검증**
-```java
-String playerName = nameField.getText().trim();
-if (playerName.isEmpty()) {
-    JOptionPane.showMessageDialog(this, "이름을 입력해주세요!", ...);
-    return;
-}
-```
-- 공백 제거 후 검증
-- 사용자 친화적 오류 메시지
-- 빈 이름으로 게임 진입 방지
+---
 
-### 3. **시스템 Look and Feel**
-```java
-UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-```
-**장점**:
-- Windows에서는 Windows 스타일
-- macOS에서는 macOS 스타일
-- 네이티브한 사용자 경험
+## 🔧 개선 제안
 
-### 4. **예외 처리**
-```java
-} catch (Exception e) {
-    System.err.println("[MainLauncher] Failed to set Look and Feel");
-    e.printStackTrace(System.err);
-}
-```
-- Look and Feel 설정 실패해도 게임 실행
-- 기본 스타일로 폴백
-
-### 5. **리소스 정리**
-```java
-dispose(); // 런처 창 닫기
-```
-- 로비 열 때 런처 창 제거
-- 메모리 누수 방지
-
-### 6. **레이아웃 조립 패턴**
-```java
-add(titlePanel, BorderLayout.NORTH);
-add(centerPanel, BorderLayout.CENTER);
-add(buttonPanel, BorderLayout.SOUTH);
-```
-- 명확한 3단 구조
-- 유지보수 쉬움
-
-## ⚠️ 개선 가능 영역
-
-### 1. **매직 넘버**
-**현재 코드:**
-```java
-setSize(500, 350);
-titleLabel.setFont(new Font("맑은 고딕", Font.BOLD, 36));
-startButton.setPreferredSize(new Dimension(160, 45));
-```
+### 1. 이름 길이 제한 (중요도: 중간)
+**현재 상태**: 이름 길이 제한 없음
 
 **문제점**:
-- 하드코딩된 숫자들
-- 의미 파악 어려움
-- 수정 시 일관성 유지 힘듦
+- 매우 긴 이름 입력 가능 (50자 이상)
+- UI 레이아웃 깨질 수 있음
 
-**개선 제안:**
+**제안**:
 ```java
-// 상수로 정의
-private static final int WINDOW_WIDTH = 500;
-private static final int WINDOW_HEIGHT = 350;
-private static final int TITLE_FONT_SIZE = 36;
-private static final int BUTTON_FONT_SIZE = 18;
-private static final Dimension BUTTON_SIZE = new Dimension(160, 45);
+// 이름 입력 필드 생성 시
+nameField = new JTextField(15);
+nameField.setFont(koreanFont);
 
-// 사용
-setSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-titleLabel.setFont(new Font("맑은 고딕", Font.BOLD, TITLE_FONT_SIZE));
-```
-
-### 2. **폰트 하드코딩**
-**현재 코드:**
-```java
-Font koreanFont = new Font("맑은 고딕", Font.PLAIN, 14);
-```
-
-**문제점**:
-- "맑은 고딕"이 없는 시스템에서 기본 폰트로 폴백
-- Linux/macOS에서 다른 폰트 사용
-
-**개선 제안:**
-```java
-private static Font getDefaultFont(int style, int size) {
-    String os = System.getProperty("os.name").toLowerCase();
-    String fontName;
+// DocumentFilter로 최대 길이 제한
+((AbstractDocument) nameField.getDocument()).setDocumentFilter(new DocumentFilter() {
+    private static final int MAX_LENGTH = 12;
     
-    if (os.contains("win")) {
-        fontName = "맑은 고딕";
-    } else if (os.contains("mac")) {
-        fontName = "Apple SD Gothic Neo";
-    } else {
-        fontName = "Noto Sans CJK KR";
+    @Override
+    public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
+            throws BadLocationException {
+        if ((fb.getDocument().getLength() + string.length()) <= MAX_LENGTH) {
+            super.insertString(fb, offset, string, attr);
+        }
     }
     
-    return new Font(fontName, style, size);
+    @Override
+    public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
+            throws BadLocationException {
+        int newLength = fb.getDocument().getLength() - length + text.length();
+        if (newLength <= MAX_LENGTH) {
+            super.replace(fb, offset, length, text, attrs);
+        }
+    }
+});
+```
+
+### 2. 엔터키로 게임 시작 (중요도: 높음)
+**현재 상태**: 버튼 클릭만 가능
+
+**제안**:
+```java
+// 이름 입력 필드에 엔터키 리스너 추가
+nameField.addActionListener(e -> startGame());
+
+// 또는 키 리스너
+nameField.addKeyListener(new KeyAdapter() {
+    @Override
+    public void keyPressed(KeyEvent e) {
+        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+            startGame();
+        }
+    }
+});
+```
+
+### 3. 이름 중복 체크 (중요도: 낮음)
+**현재 상태**: 서버에서만 중복 체크
+
+**제안**:
+```java
+private void startGame() {
+    String playerName = nameField.getText().trim();
+    
+    if (playerName.isEmpty()) {
+        showError("이름을 입력해주세요!");
+        return;
+    }
+    
+    // 특수문자 체크
+    if (!playerName.matches("^[a-zA-Z0-9가-힣_]+$")) {
+        showError("이름에는 영문, 한글, 숫자, 밑줄(_)만 사용할 수 있습니다.");
+        return;
+    }
+    
+    // ... (기존 로직)
+}
+
+private void showError(String message) {
+    JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
 }
 ```
 
-### 3. **색상 하드코딩**
-**현재 코드:**
+### 4. 아이콘 추가 (중요도: 낮음)
+**현재 상태**: 기본 Java 아이콘
+
+**제안**:
 ```java
-titlePanel.setBackground(new Color(30, 40, 55));
-centerPanel.setBackground(new Color(40, 50, 65));
-startButton.setBackground(new Color(76, 175, 80));
+private void initUI() {
+    // ... (기존 코드)
+    
+    // 타이틀바 아이콘 설정
+    try {
+        Image icon = ImageIO.read(new File("assets/icon.png"));
+        setIconImage(icon);
+    } catch (IOException e) {
+        System.err.println("[MainLauncher] Failed to load icon");
+    }
+}
 ```
 
-**개선 제안:**
+### 5. 플레이어 이름 기억 (중요도: 낮음)
+**현재 상태**: 매번 입력 필요
+
+**제안**:
 ```java
-// ColorScheme 클래스 생성
-public class ColorScheme {
-    public static final Color DARK_BG = new Color(30, 40, 55);
-    public static final Color MEDIUM_BG = new Color(40, 50, 65);
-    public static final Color SUCCESS_GREEN = new Color(76, 175, 80);
-    public static final Color DANGER_RED = new Color(244, 67, 54);
+import java.util.prefs.*;
+
+private void loadLastName() {
+    Preferences prefs = Preferences.userNodeForPackage(MainLauncher.class);
+    String lastPlayerName = prefs.get("playerName", "");
+    nameField.setText(lastPlayerName);
+    nameField.selectAll(); // 텍스트 선택 상태로
 }
 
-// 사용
-titlePanel.setBackground(ColorScheme.DARK_BG);
-```
-
-### 4. **이름 길이 제한 없음**
-**현재 코드:**
-```java
-if (playerName.isEmpty()) { ... }
-```
-
-**문제점**:
-- 매우 긴 이름 입력 가능
-- 서버/UI에서 표시 문제 발생 가능
-
-**개선 제안:**
-```java
-private static final int MIN_NAME_LENGTH = 2;
-private static final int MAX_NAME_LENGTH = 16;
+private void savePlayerName(String playerName) {
+    Preferences prefs = Preferences.userNodeForPackage(MainLauncher.class);
+    prefs.put("playerName", playerName);
+}
 
 private void startGame() {
     String playerName = nameField.getText().trim();
@@ -210,310 +379,122 @@ private void startGame() {
         return;
     }
     
-    if (playerName.length() < MIN_NAME_LENGTH) {
-        showError("이름은 최소 " + MIN_NAME_LENGTH + "자 이상이어야 합니다!");
-        return;
-    }
-    
-    if (playerName.length() > MAX_NAME_LENGTH) {
-        showError("이름은 최대 " + MAX_NAME_LENGTH + "자까지 가능합니다!");
-        return;
-    }
-    
-    // ...
-}
-
-private void showError(String message) {
-    JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
-}
-```
-
-### 5. **특수문자 검증 부족**
-**현재 코드:**
-```java
-String playerName = nameField.getText().trim();
-// 어떤 문자든 허용
-```
-
-**문제점**:
-- SQL Injection 유사 문제 (서버 측)
-- UI 깨짐 (특수문자 렌더링)
-
-**개선 제안:**
-```java
-private boolean isValidName(String name) {
-    // 한글, 영문, 숫자만 허용
-    return name.matches("^[a-zA-Z0-9가-힣]+$");
-}
-
-private void startGame() {
-    String playerName = nameField.getText().trim();
-    
-    if (!isValidName(playerName)) {
-        showError("이름은 한글, 영문, 숫자만 사용 가능합니다!");
-        return;
-    }
-    
-    // ...
-}
-```
-
-### 6. **Enter 키 지원 부족**
-**현재 코드:**
-```java
-nameField = new JTextField(15);
-// Enter 키 입력 시 아무 일도 안 일어남
-```
-
-**개선 제안:**
-```java
-nameField = new JTextField(15);
-nameField.addActionListener(e -> startGame()); // Enter 키 시 게임 시작
-
-// 또는 getRootPane 사용
-getRootPane().setDefaultButton(startButton);
-```
-
-### 7. **설정 저장/불러오기 없음**
-**현재 상태**:
-- 매번 이름 입력 필요
-
-**개선 제안:**
-```java
-private void initUI() {
-    // ...
-    
-    // 마지막 사용 이름 불러오기
-    String lastUsedName = GameConfig.loadPlayerName();
-    if (lastUsedName != null) {
-        nameField.setText(lastUsedName);
-    }
-}
-
-private void startGame() {
-    String playerName = nameField.getText().trim();
-    // ...
-    
     // 이름 저장
-    GameConfig.savePlayerName(playerName);
+    savePlayerName(playerName);
     
-    // 로비 열기
-    // ...
+    // ... (기존 로직)
+}
+
+public MainLauncher() {
+    super("FPS Game Launcher");
+    initUI();
+    loadLastName(); // 마지막 이름 불러오기
 }
 ```
 
-### 8. **로비 전환 실패 처리 부족**
-**현재 코드:**
+### 6. 버튼 호버 효과 (중요도: 낮음)
+**현재 상태**: 정적인 버튼
+
+**제안**:
 ```java
-SwingUtilities.invokeLater(() -> {
-    LobbyFrame lobby = new LobbyFrame(playerName);
-    lobby.setVisible(true);
-    dispose();
+// 버튼 호버 효과 추가
+startButton.addMouseListener(new MouseAdapter() {
+    @Override
+    public void mouseEntered(MouseEvent e) {
+        startButton.setBackground(new Color(67, 160, 71)); // 약간 어두운 녹색
+    }
+    
+    @Override
+    public void mouseExited(MouseEvent e) {
+        startButton.setBackground(new Color(76, 175, 80)); // 원래 녹색
+    }
 });
-```
 
-**문제점**:
-- LobbyFrame 생성 실패 시?
-- 런처가 이미 닫혀서 복구 불가
-
-**개선 제안:**
-```java
-SwingUtilities.invokeLater(() -> {
-    try {
-        LobbyFrame lobby = new LobbyFrame(playerName);
-        lobby.setVisible(true);
-        dispose();
-    } catch (Exception ex) {
-        ex.printStackTrace(System.err);
-        JOptionPane.showMessageDialog(
-            this,
-            "로비 진입에 실패했습니다: " + ex.getMessage(),
-            "Error",
-            JOptionPane.ERROR_MESSAGE
-        );
+exitButton.addMouseListener(new MouseAdapter() {
+    @Override
+    public void mouseEntered(MouseEvent e) {
+        exitButton.setBackground(new Color(229, 57, 53)); // 약간 어두운 빨강
+    }
+    
+    @Override
+    public void mouseExited(MouseEvent e) {
+        exitButton.setBackground(new Color(244, 67, 54)); // 원래 빨강
     }
 });
 ```
 
-## 🏗️ 아키텍처 분석
+### 7. 로딩 인디케이터 (중요도: 낮음)
+**현재 상태**: 로비 생성 시 즉시 전환
 
-### UI 구조
-```
-MainLauncher (JFrame)
-    ├── titlePanel (BorderLayout.NORTH)
-    │   └── titleLabel ("FPS 게임")
-    ├── centerPanel (BorderLayout.CENTER)
-    │   ├── nameLabel ("플레이어 이름:")
-    │   └── nameField (JTextField)
-    └── buttonPanel (BorderLayout.SOUTH)
-        ├── startButton ("게임 시작")
-        └── exitButton ("종료")
-```
-
-### 이벤트 흐름
-```
-1. main() 실행
-2. Look and Feel 설정
-3. MainLauncher 생성
-4. initUI() 호출
-5. 사용자 이름 입력
-6. "게임 시작" 버튼 클릭
-7. startGame() 호출
-8. 이름 검증
-9. LobbyFrame 생성
-10. MainLauncher dispose
-```
-
-### 의존성
-```
-MainLauncher
-    ├── LobbyFrame (로비로 전환)
-    └── Swing 컴포넌트
-```
-
-## 📊 성능 고려사항
-
-### 메모리 사용
+**제안**:
 ```java
-MainLauncher 객체: ~1KB
-└── UI 컴포넌트들: ~10KB
-총: ~11KB (무시 가능)
-```
-
-### 시작 시간
-```
-Look and Feel 설정: ~50ms
-UI 생성: ~100ms
-화면 표시: ~50ms
-총: ~200ms (충분히 빠름)
-```
-
-## 🧪 테스트 시나리오
-
-### 1. 정상 시나리오
-```
-1. 프로그램 시작
-2. "Player1" 입력
-3. "게임 시작" 클릭
-→ 로비 열림, 런처 닫힘
-```
-
-### 2. 빈 이름 입력
-```
-1. 이름 입력하지 않음
-2. "게임 시작" 클릭
-→ 오류 메시지 표시
-```
-
-### 3. 공백만 입력
-```
-1. "   " 입력
-2. "게임 시작" 클릭
-→ trim() 후 빈 문자열로 인식, 오류 표시
-```
-
-### 4. 종료 버튼
-```
-1. "종료" 버튼 클릭
-→ 프로그램 종료 (System.exit(0))
-```
-
-## 📈 사용 예시
-
-### 기본 사용
-```java
-// 실행
-java -jar NetFps.jar
-
-// 또는
-javac MainLauncher.java
-java com.fpsgame.client.MainLauncher
-```
-
-### 커스텀 Look and Feel
-```java
-public static void main(String[] args) {
-    try {
-        // Nimbus Look and Feel 사용
-        for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
-            if ("Nimbus".equals(info.getName())) {
-                UIManager.setLookAndFeel(info.getClassName());
-                break;
-            }
+private void startGame() {
+    String playerName = nameField.getText().trim();
+    
+    if (playerName.isEmpty()) {
+        showError("이름을 입력해주세요!");
+        return;
+    }
+    
+    // 버튼 비활성화
+    startButton.setEnabled(false);
+    startButton.setText("로딩 중...");
+    
+    // 백그라운드 스레드에서 로비 생성
+    new Thread(() -> {
+        try {
+            // 리소스 사전 로드 등
+            Thread.sleep(500);
+            
+            // EDT에서 UI 생성
+            SwingUtilities.invokeLater(() -> {
+                LobbyFrame lobby = new LobbyFrame(playerName);
+                lobby.setVisible(true);
+                dispose();
+            });
+        } catch (Exception e) {
+            SwingUtilities.invokeLater(() -> {
+                startButton.setEnabled(true);
+                startButton.setText("게임 시작");
+                showError("로비 생성 실패: " + e.getMessage());
+            });
         }
-    } catch (Exception e) {
-        // 폴백
-    }
-    
-    SwingUtilities.invokeLater(() -> {
-        new MainLauncher().setVisible(true);
-    });
+    }).start();
 }
 ```
 
-## 🎓 학습 포인트
+---
 
-### 초보자를 위한 핵심 개념
-1. **JFrame 사용법**: Swing 윈도우 생성
-2. **BorderLayout**: 5개 영역 레이아웃
-3. **ActionListener**: 버튼 클릭 이벤트 처리
+## 📊 코드 품질 평가
 
-### 중급자를 위한 심화 개념
-1. **EDT**: Event Dispatch Thread의 중요성
-2. **Look and Feel**: 플랫폼별 스타일
-3. **dispose() vs setVisible(false)**: 리소스 정리
-
-### 고급 주제
-1. **SplashScreen**: 로딩 화면 표시
-2. **JLayeredPane**: 복잡한 레이아웃
-3. **MVC 패턴**: Model-View-Controller 분리
-
-## 🔍 코드 품질 평가
-
-| 항목 | 평가 | 설명 |
+| 항목 | 점수 | 설명 |
 |------|------|------|
-| **가독성** | ⭐⭐⭐⭐⭐ | 매우 명확한 구조 |
-| **유지보수성** | ⭐⭐⭐⭐ | 간단한 UI, 쉬운 수정 |
-| **확장성** | ⭐⭐⭐ | 추가 필드 쉽게 추가 가능 |
-| **성능** | ⭐⭐⭐⭐⭐ | 시작 시간 충분히 빠름 |
-| **안정성** | ⭐⭐⭐⭐ | 입력 검증, 예외 처리 양호 |
+| **UI 디자인** | ⭐⭐⭐⭐⭐ | 간결하고 명확한 3단 레이아웃 |
+| **한글 지원** | ⭐⭐⭐⭐⭐ | 맑은 고딕 폰트 명시적 사용 |
+| **입력 검증** | ⭐⭐⭐☆☆ | 빈 문자열만 체크, 길이/특수문자 미체크 |
+| **사용성** | ⭐⭐⭐☆☆ | 엔터키 미지원, 이름 기억 안 함 |
+| **코드 간결성** | ⭐⭐⭐⭐⭐ | 153줄, 명확한 구조 |
+| **EDT 준수** | ⭐⭐⭐⭐⭐ | SwingUtilities.invokeLater 사용 |
 
-## 📝 종합 평가
+**총점: 4.2 / 5.0** ⭐⭐⭐⭐☆
 
-### 강점
-✅ **EDT 준수**: SwingUtilities.invokeLater 사용  
-✅ **입력 검증**: 빈 문자열 체크  
-✅ **사용자 친화적**: 한글 폰트, 명확한 메시지  
-✅ **시스템 통합**: 네이티브 Look and Feel  
+---
 
-### 개선 제안 우선순위
-1. **이름 길이 제한** (높음) - 2~16자
-2. **특수문자 검증** (높음) - 정규식 사용
-3. **Enter 키 지원** (중간) - 사용성 개선
-4. **상수화** (중간) - 매직 넘버 제거
-5. **이름 저장** (낮음) - 편의 기능
-6. **색상 테마** (낮음) - 일관성
+## 🎓 결론
 
-### 결론
-**기능적으로 완성도 높은 런처**입니다. 기본 요구사항은 모두 충족하며, Swing 권장 패턴을 잘 따릅니다. 입력 검증 강화만 추가하면 프로덕션 레벨입니다.
+MainLauncher.java는 **간결하고 직관적인 게임 진입 화면**입니다. 특히 **한글 폰트 지원**, **Material Design 색상**, **EDT 준수**가 인상적입니다.
 
-**권장사항**:
-1. **즉시 적용**:
-   - 이름 길이 제한 (2~16자)
-   - 특수문자 검증 (정규식)
-   - Enter 키 지원
-   
-2. **다음 버전**:
-   - 마지막 사용 이름 저장
-   - 색상/폰트 상수화
-   
-3. **선택 적용**:
-   - 다국어 지원 (i18n)
-   - 설정 화면 추가
-   - 소셜 로그인
+### 주요 성과
+1. ✅ **간결한 UI**: 3단 레이아웃 (타이틀, 입력, 버튼)
+2. ✅ **한글 지원**: 맑은 고딕 폰트 명시적 사용
+3. ✅ **Material Design**: 녹색(시작) vs 빨간색(종료)
+4. ✅ **입력 검증**: 빈 문자열 체크
+5. ✅ **EDT 준수**: SwingUtilities.invokeLater 사용
 
-**UI/UX 개선 아이디어**:
-- 프로필 사진 선택
-- 테마 선택 (다크/라이트 모드)
-- 최근 사용 이름 드롭다운
-- 애니메이션 전환 효과
+### 개선 방향
+1. **엔터키 지원**: nameField에 ActionListener 추가 (필수!)
+2. **이름 길이 제한**: DocumentFilter로 12자 제한
+3. **이름 기억**: Preferences API로 마지막 이름 저장
+4. **특수문자 체크**: 정규식으로 검증
+
+**프로덕션 레벨**이며, 엔터키 지원만 추가하면 **완벽한 런처 화면**입니다. 🎉

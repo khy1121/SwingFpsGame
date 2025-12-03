@@ -2,15 +2,16 @@
 
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/common/Ability.java`
-- **역할**: 캐릭터 스킬(Ability) 시스템의 기본 클래스
-- **라인 수**: 105줄
-- **주요 기능**: 스킬 쿨다운 관리, 활성화/비활성화, 상태 추적
+- **역할**: 캐릭터 스킬 기본 클래스
+- **라인 수**: 107줄
+- **주요 기능**: 스킬 메타데이터, 쿨다운 관리, 활성화 상태 추적
+- **특징**: 마나 없음, 쿨다운 기반 스킬 시스템
 
 ---
 
 ## 🎯 주요 기능
 
-### 1. 스킬 타입 분류 (AbilityType Enum)
+### 1. 스킬 타입 열거형
 ```java
 public enum AbilityType {
     BASIC,      // 기본 공격 (좌클릭)
@@ -18,637 +19,569 @@ public enum AbilityType {
     ULTIMATE    // 궁극기 (R키)
 }
 ```
-- **설계 의도**: 스킬을 3가지 타입으로 명확히 구분
-- **사용처**: UI 표시, 입력 매핑, 밸런싱
+- **3가지 타입**: 기본 공격, 전술 스킬, 궁극기
+- **키 바인딩 명확**: 좌클릭 (BASIC), E (TACTICAL), R (ULTIMATE)
+- **타입 안전**: Enum으로 오타 방지
 
-### 2. 스킬 속성 관리
+### 2. 스킬 메타데이터
 ```java
-public final String id;              // 스킬 고유 ID
-public final String name;            // 스킬 이름
-public final String description;     // 스킬 설명
-public final AbilityType type;       // 스킬 타입
-
-public final float cooldown;         // 쿨다운 (초)
-public final float duration;         // 지속 시간 (초, 0이면 즉발)
-public final float range;            // 사거리 (0이면 자신에게)
-public final float damage;           // 데미지 (0이면 공격 스킬 아님)
+public class Ability {
+    // 불변 속성 (스킬 정의)
+    public final String id;              // "raven_basic", "piper_mark" 등
+    public final String name;            // "고속 연사", "적 표시" 등
+    public final String description;     // 스킬 설명
+    public final AbilityType type;       // BASIC, TACTICAL, ULTIMATE
+    
+    // 스킬 수치
+    public final float cooldown;         // 쿨다운 (초)
+    public final float duration;         // 지속 시간 (초, 0이면 즉발)
+    public final float range;            // 사거리 (0이면 자신에게)
+    public final float damage;           // 데미지 (0이면 공격 스킬 아님)
+    
+    // 런타임 상태 (변경 가능)
+    private float currentCooldown = 0f;  // 현재 쿨다운 (0이면 사용 가능)
+    private boolean isActive = false;    // 활성화 상태
+    private float activeDuration = 0f;   // 활성화 지속 시간
+    private float cooldownMultiplier = 1f; // 쿨다운 배수 (버프/디버프)
+}
 ```
-- **불변성**: `final` 키워드로 스킬 기본 속성 보호
-- **명확한 의미**: 각 필드가 게임 메커닉에 직접 대응
+**설계 특징**:
+- **불변 속성**: `final` 키워드로 스킬 정의 변경 불가
+- **가변 상태**: `private` 필드로 런타임 상태 관리
+- **명확한 의미**: `duration = 0` → 즉발, `damage = 0` → 비공격 스킬
 
-### 3. 런타임 상태 추적
+### 3. 쿨다운 관리
+
+#### 프레임별 업데이트
 ```java
-private float currentCooldown = 0f;  // 현재 쿨다운 (0이면 사용 가능)
-private boolean isActive = false;    // 활성화 상태
-private float activeDuration = 0f;   // 활성화 지속 시간
-private float cooldownMultiplier = 1f; // 런타임 쿨다운 배수 (버프 등)
+/**
+ * 프레임마다 호출 (쿨다운 감소)
+ */
+public void update(float deltaTime) {
+    // 쿨다운 감소
+    if (currentCooldown > 0) {
+        currentCooldown = Math.max(0, currentCooldown - deltaTime);
+    }
+    
+    // 지속 시간 감소 (활성화 상태일 때만)
+    if (isActive && duration > 0) {
+        activeDuration -= deltaTime;
+        if (activeDuration <= 0) {
+            deactivate(); // 자동 비활성화
+        }
+    }
+}
 ```
-- **동적 상태**: 게임 진행 중 변경되는 값들
-- **버프 시스템**: `cooldownMultiplier`로 쿨다운 조절 가능
+**deltaTime 기반**:
+- **프레임 독립적**: 60fps, 30fps 상관없이 동일한 쿨다운 감소
+- **음수 방지**: `Math.max(0, ...)` 사용
 
----
-
-## ✅ 강점 (Strengths)
-
-### 1. **명확한 책임 분리** ⭐⭐⭐⭐⭐
+#### 사용 가능 여부 체크
 ```java
-// 각 메서드가 단일 책임만 수행
-public boolean canUse() { return currentCooldown <= 0; }
-public void activate() { /* 활성화 로직만 */ }
-public void deactivate() { /* 비활성화 로직만 */ }
-public void update(float deltaTime) { /* 시간 업데이트만 */ }
+/**
+ * 스킬 사용 가능 여부
+ */
+public boolean canUse() {
+    return currentCooldown <= 0;
+}
 ```
-- **장점**: 메서드 이름만으로 역할 파악 가능
-- **유지보수**: 각 기능을 독립적으로 수정 가능
-- **테스트**: 단위 테스트 작성이 용이
+- **간단한 로직**: 쿨다운이 0 이하면 사용 가능
+- **별칭 메서드**: `isReady()`와 동일 (중복)
 
-### 2. **안전한 활성화 로직** ⭐⭐⭐⭐
+### 4. 스킬 활성화
+
+#### 활성화 로직
 ```java
+/**
+ * 스킬 활성화
+ */
 public void activate() {
-    if (currentCooldown <= 0) {  // 쿨다운 체크
-        float mul = cooldownMultiplier > 0 ? cooldownMultiplier : 1f;  // 안전한 배수 처리
+    if (currentCooldown <= 0) {
+        // 쿨다운 배수 적용 (버프/디버프)
+        float mul = cooldownMultiplier > 0 ? cooldownMultiplier : 1f;
         currentCooldown = cooldown * mul;
-        if (duration > 0) {  // 지속형 스킬만 활성화
+        
+        // 지속 시간이 있으면 활성화 상태로 전환
+        if (duration > 0) {
             isActive = true;
             activeDuration = duration;
         }
     }
 }
 ```
-- **다중 검증**: 쿨다운, 배수, 지속시간 모두 체크
-- **방어적 프로그래밍**: 잘못된 값 방지
+**핵심 로직**:
+1. **쿨다운 체크**: `currentCooldown <= 0`일 때만 실행
+2. **쿨다운 시작**: `cooldown * cooldownMultiplier`
+3. **활성화 상태**: `duration > 0`일 때만 활성화
 
-### 3. **직관적인 상태 조회** ⭐⭐⭐⭐⭐
+**사용 예시**:
 ```java
-public boolean canUse() { return currentCooldown <= 0; }
-public boolean isReady() { return currentCooldown <= 0; }
+// Raven 대쉬 (5초 쿨다운, 0.5초 지속)
+Ability dash = new Ability("raven_dash", "대쉬", "빠르게 전방으로 돌진",
+    Ability.AbilityType.TACTICAL, 5f, 0.5f, 200f, 0f);
+
+// 사용
+if (dash.canUse()) {
+    dash.activate();
+    // currentCooldown = 5초
+    // isActive = true
+    // activeDuration = 0.5초
+}
+
+// 매 프레임 업데이트
+dash.update(deltaTime);
+
+// 0.5초 후 자동 비활성화
+// isActive = false
+// currentCooldown = 4.5초 (계속 감소)
+```
+
+#### 비활성화 로직
+```java
+/**
+ * 스킬 비활성화
+ */
+public void deactivate() {
+    isActive = false;
+    activeDuration = 0;
+}
+```
+- **수동 비활성화**: 스킬 중단 시 호출
+- **자동 비활성화**: `update()` 메서드에서 지속 시간 종료 시 호출
+
+### 5. 쿨다운 배수 시스템
+```java
+private float cooldownMultiplier = 1f; // 기본값 1.0 (100%)
+
+public void setCooldownMultiplier(float mul) { 
+    this.cooldownMultiplier = mul; 
+}
+
+public float getCooldownMultiplier() { 
+    return cooldownMultiplier; 
+}
+```
+**사용 사례**:
+- **버프**: `setCooldownMultiplier(0.5f)` → 쿨다운 50% (2배 빠름)
+- **디버프**: `setCooldownMultiplier(2.0f)` → 쿨다운 200% (2배 느림)
+- **General 오라**: 공격속도 +15% → `0.85f` (15% 감소)
+
+**예시**:
+```java
+// Raven 과충전 (공격속도 증가)
+ravenBasic.setCooldownMultiplier(0.5f); // 0.3초 → 0.15초
+
+// 6초 후 버프 종료
+ravenBasic.setCooldownMultiplier(1.0f); // 원래대로
+```
+
+### 6. 쿨다운 퍼센트
+```java
+/**
+ * 쿨다운 진행률 (0.0 ~ 1.0)
+ * UI에서 쿨다운 게이지 표시용
+ */
 public float getCooldownPercent() { 
     return cooldown > 0 ? currentCooldown / cooldown : 0; 
 }
 ```
-- **UI 친화적**: 쿨다운 퍼센트로 프로그레스 바 표시 가능
-- **명확한 네이밍**: `canUse`, `isReady` 등 자연스러운 이름
-
-### 4. **게임 메커닉 확장성** ⭐⭐⭐⭐
+**사용 예시**:
 ```java
-private float cooldownMultiplier = 1f; // 버프/디버프로 조절 가능
+// UI 렌더링
+float percent = ability.getCooldownPercent();
+int cooldownWidth = (int)(50 * percent); // 50픽셀 게이지
+graphics.fillRect(x, y, cooldownWidth, 10);
 
-public void setCooldownMultiplier(float mul) { 
-    this.cooldownMultiplier = mul; 
-}
-```
-- **버프 시스템**: 아이템, 스킬로 쿨다운 감소/증가 가능
-- **밸런스 조정**: 런타임에 스킬 밸런싱 가능
-
----
-
-## ⚠️ 개선 영역 (Areas for Improvement)
-
-### 1. **불변 객체 패턴 미완성** 🔴 HIGH
-**현재 코드:**
-```java
-public class Ability {
-    public final String id;
-    public final float cooldown;
-    // ... final 필드들
-    
-    private float currentCooldown = 0f;  // 가변 상태
-    private boolean isActive = false;
-    // ... private 가변 필드들
-}
+// 텍스트 표시
+String cooldownText = String.format("%.1f초", ability.getCurrentCooldown());
 ```
 
-**문제점:**
-- 불변 필드와 가변 필드가 혼재
-- 스킬 "정의"와 스킬 "인스턴스 상태"가 분리되지 않음
-- 같은 스킬을 여러 플레이어가 사용할 때 상태 공유 불가
-
-**개선안:**
+### 7. 쿨다운 리셋
 ```java
-// 1. 불변 스킬 정의 클래스 (공유 가능)
-public class AbilityDefinition {
-    public final String id;
-    public final String name;
-    public final String description;
-    public final AbilityType type;
-    public final float cooldown;
-    public final float duration;
-    public final float range;
-    public final float damage;
-    
-    // 생성자, getters만 존재
-}
-
-// 2. 가변 스킬 상태 클래스 (플레이어마다 별도 인스턴스)
-public class AbilityInstance {
-    private final AbilityDefinition definition;
-    private float currentCooldown = 0f;
-    private boolean isActive = false;
-    private float activeDuration = 0f;
-    private float cooldownMultiplier = 1f;
-    
-    public AbilityInstance(AbilityDefinition definition) {
-        this.definition = definition;
-    }
-    
-    public void update(float deltaTime) { /* ... */ }
-    public void activate() { /* ... */ }
-    // 상태 관련 메서드들
+/**
+ * 쿨다운 리셋 (테스트용)
+ */
+public void resetCooldown() {
+    currentCooldown = 0;
 }
 ```
+**사용 사례**:
+- **테스트**: 스킬 즉시 재사용
+- **특수 스킬**: Skull의 "탄약 보급" (모든 스킬 쿨타임 초기화)
+- **치트 모드**: 개발/디버깅용
 
-**장점:**
-- 메모리 효율: 스킬 정의는 1개만 로드, 상태는 플레이어마다 생성
-- 멀티플레이어: 각 플레이어가 독립적인 스킬 상태 유지
-- 스레드 안전: 불변 객체는 동기화 불필요
-
----
-
-### 2. **네거티브 값 검증 부재** 🟡 MEDIUM
-**현재 코드:**
+### 8. Getter 메서드
 ```java
-public Ability(String id, String name, String description, AbilityType type,
-               float cooldown, float duration, float range, float damage) {
-    this.id = id;
-    this.name = name;
-    // ... 검증 없이 그대로 할당
-    this.cooldown = cooldown;  // 음수 가능
-    this.damage = damage;      // 음수 가능
-}
-```
+// 메타데이터 조회
+public String getName() { return name; }
+public String getDescription() { return description; }
+public AbilityType getType() { return type; }
 
-**문제점:**
-- 음수 쿨다운, 음수 데미지 입력 가능
-- `null` ID나 이름 허용
-
-**개선안:**
-```java
-public Ability(String id, String name, String description, AbilityType type,
-               float cooldown, float duration, float range, float damage) {
-    // null 체크
-    if (id == null || id.trim().isEmpty()) {
-        throw new IllegalArgumentException("Ability ID cannot be null or empty");
-    }
-    if (name == null || name.trim().isEmpty()) {
-        throw new IllegalArgumentException("Ability name cannot be null or empty");
-    }
-    if (type == null) {
-        throw new IllegalArgumentException("Ability type cannot be null");
-    }
-    
-    // 범위 체크
-    if (cooldown < 0) {
-        throw new IllegalArgumentException("Cooldown cannot be negative: " + cooldown);
-    }
-    if (duration < 0) {
-        throw new IllegalArgumentException("Duration cannot be negative: " + duration);
-    }
-    if (range < 0) {
-        throw new IllegalArgumentException("Range cannot be negative: " + range);
-    }
-    if (damage < 0) {
-        throw new IllegalArgumentException("Damage cannot be negative: " + damage);
-    }
-    
-    this.id = id.trim();
-    this.name = name.trim();
-    this.description = description != null ? description : "";
-    this.type = type;
-    this.cooldown = cooldown;
-    this.duration = duration;
-    this.range = range;
-    this.damage = damage;
-}
-```
-
----
-
-### 3. **중복 메서드 제거** 🟢 LOW
-**현재 코드:**
-```java
-public boolean canUse() { return currentCooldown <= 0; }
+// 상태 조회
+public float getCurrentCooldown() { return currentCooldown; }
+public float getCooldownPercent() { return cooldown > 0 ? currentCooldown / cooldown : 0; }
+public boolean isActive() { return isActive; }
+public float getActiveDuration() { return activeDuration; }
 public boolean isReady() { return currentCooldown <= 0; }
 ```
-
-**문제점:**
-- 완전히 동일한 로직의 메서드 2개
-- API 혼란 유발
-
-**개선안 1 - 하나만 남기기:**
-```java
-public boolean isReady() { return currentCooldown <= 0; }
-// canUse() 제거
-```
-
-**개선안 2 - 명확한 역할 분리:**
-```java
-// 쿨다운만 체크
-public boolean isReady() { 
-    return currentCooldown <= 0; 
-}
-
-// 쿨다운 + 기타 조건 체크 (확장 가능)
-public boolean canUse() { 
-    return isReady() && !isDisabled && hasResources(); 
-}
-```
+**중복 메서드**:
+- `canUse()` vs `isReady()`: 동일한 기능 (둘 다 `currentCooldown <= 0` 체크)
 
 ---
 
-### 4. **불안전한 setCooldownMultiplier** 🟡 MEDIUM
-**현재 코드:**
+## 💡 강점
+
+### 1. 단순하고 명확한 설계
+- **3가지 타입**: BASIC, TACTICAL, ULTIMATE (이해하기 쉬움)
+- **4가지 수치**: cooldown, duration, range, damage (직관적)
+- **deltaTime 기반**: 프레임 독립적 업데이트
+
+### 2. 불변성과 캡슐화
 ```java
-public void setCooldownMultiplier(float mul) { 
-    this.cooldownMultiplier = mul; 
+// 스킬 정의는 불변
+public final String id;
+public final float cooldown;
+
+// 런타임 상태는 private
+private float currentCooldown;
+private boolean isActive;
+```
+- **스킬 정의 보호**: `final` 키워드로 변경 불가
+- **상태 숨김**: `private` 필드로 캡슐화
+
+### 3. 자동 비활성화
+```java
+public void update(float deltaTime) {
+    if (isActive && duration > 0) {
+        activeDuration -= deltaTime;
+        if (activeDuration <= 0) {
+            deactivate(); // 자동 비활성화
+        }
+    }
+}
+```
+- **메모리 누수 방지**: 지속 시간 종료 시 자동으로 비활성화
+- **편의성**: 수동 비활성화 호출 불필요
+
+### 4. 쿨다운 배수 시스템
+- **유연한 버프/디버프**: `cooldownMultiplier`로 런타임 조정
+- **다양한 활용**: 공격속도 증가, EMP 디버프, 힐 버프 등
+
+### 5. UI 친화적 메서드
+```java
+public float getCooldownPercent() { /* ... */ } // 게이지 표시
+public boolean isActive() { /* ... */ }         // 활성화 표시
+public float getCurrentCooldown() { /* ... */ } // 쿨다운 텍스트
+```
+- **즉시 사용 가능**: UI에서 직접 호출
+
+---
+
+## 🔧 개선 제안
+
+### 1. 중복 메서드 제거 (중요도: 낮음)
+**현재 상태**: `canUse()`와 `isReady()` 동일
+
+```java
+public boolean canUse() {
+    return currentCooldown <= 0;
+}
+
+public boolean isReady() {
+    return currentCooldown <= 0;
 }
 ```
 
-**문제점:**
-- 음수나 0 입력 가능 → `activate()`에서 방어 코드 필요
-- 극단적인 값 (0.001, 1000) 허용
+**제안**: 하나만 남기고 제거
+```java
+// canUse() 제거하고 isReady()만 사용
+public boolean isReady() {
+    return currentCooldown <= 0;
+}
+```
 
-**개선안:**
+### 2. 활성화 실패 피드백 (중요도: 중간)
+**현재 상태**: `activate()` 메서드가 아무 반환값 없음
+
+```java
+public void activate() {
+    if (currentCooldown <= 0) {
+        // 성공
+        currentCooldown = cooldown * cooldownMultiplier;
+        // ...
+    }
+    // 실패 시 아무 일도 안 일어남
+}
+```
+
+**문제점**:
+- 활성화 실패 여부를 알 수 없음
+- UI에서 "쿨다운 중" 메시지 표시 불가
+
+**제안**:
+```java
+/**
+ * 스킬 활성화
+ * @return 성공 여부
+ */
+public boolean activate() {
+    if (currentCooldown <= 0) {
+        float mul = cooldownMultiplier > 0 ? cooldownMultiplier : 1f;
+        currentCooldown = cooldown * mul;
+        
+        if (duration > 0) {
+            isActive = true;
+            activeDuration = duration;
+        }
+        return true; // 성공
+    }
+    return false; // 실패 (쿨다운 중)
+}
+
+// 사용
+if (!ability.activate()) {
+    showMessage("쿨다운 중: " + ability.getCurrentCooldown() + "초");
+}
+```
+
+### 3. 쿨다운 배수 검증 (중요도: 중간)
+**현재 상태**: 음수 배수 체크만 함
+
+```java
+float mul = cooldownMultiplier > 0 ? cooldownMultiplier : 1f;
+```
+
+**문제점**:
+- 극단적인 값 (0.01f, 100f) 허용
+- 밸런스 붕괴 가능
+
+**제안**:
 ```java
 public void setCooldownMultiplier(float mul) {
-    if (mul <= 0) {
-        throw new IllegalArgumentException(
-            "Cooldown multiplier must be positive: " + mul
-        );
-    }
-    if (mul < 0.1f || mul > 10.0f) {
-        throw new IllegalArgumentException(
-            "Cooldown multiplier out of reasonable range [0.1, 10.0]: " + mul
-        );
+    // 0.1 ~ 5.0 범위 제한 (10배 빠름 ~ 5배 느림)
+    if (mul < 0.1f) {
+        System.err.println("[경고] 쿨다운 배수가 너무 작음: " + mul + " -> 0.1로 제한");
+        mul = 0.1f;
+    } else if (mul > 5.0f) {
+        System.err.println("[경고] 쿨다운 배수가 너무 큼: " + mul + " -> 5.0으로 제한");
+        mul = 5.0f;
     }
     this.cooldownMultiplier = mul;
 }
 ```
 
----
+### 4. 마나 시스템 준비 (중요도: 낮음)
+**현재 상태**: "마나 비용 없음" 주석
 
-### 5. **활성화 상태 불일치 가능성** 🟡 MEDIUM
-**현재 코드:**
 ```java
-public void deactivate() {
-    isActive = false;
-    activeDuration = 0;
-}
-
-// activate()에서는 duration > 0일 때만 isActive = true
-// 그런데 외부에서 deactivate() 직접 호출 가능
+/**
+ * 캐릭터 스킬(Ability) 기본 클래스
+ * 쿨타임만 있고 마나 비용 없음
+ */
 ```
 
-**문제점:**
-- `duration == 0` 스킬도 `deactivate()` 호출 가능
-- 상태 전이가 명확하지 않음
-
-**개선안:**
+**미래 확장성**:
 ```java
-public void deactivate() {
-    if (!isActive) {
-        return;  // 이미 비활성 상태면 무시
-    }
-    isActive = false;
-    activeDuration = 0;
-}
-
-// 또는 패키지 전용으로 제한
-void deactivate() {  // public 제거
-    isActive = false;
-    activeDuration = 0;
-}
-```
-
----
-
-## 🏗️ 아키텍처 분석
-
-### 디자인 패턴
-1. **Value Object (부분적)**
-   - `final` 필드로 불변 속성 표현
-   - 완전한 불변 객체는 아님 (가변 상태 포함)
-
-2. **State Pattern (암묵적)**
-   - `isActive`, `currentCooldown`으로 상태 표현
-   - 명시적 State 패턴은 아니지만 유사한 개념
-
-### 의존성
-```
-Ability (독립 클래스)
-  ↓ 사용됨
-CharacterData, GamePanel, GameServer
-```
-- **낮은 결합도**: 다른 클래스에 의존하지 않음
-- **높은 응집도**: 스킬 관련 로직만 포함
-
----
-
-## ⚡ 성능 고려사항
-
-### 1. **객체 생성 비용**
-```java
-// 현재: 플레이어마다 스킬 객체 생성
-Player player1 = new Player();
-player1.abilities[0] = new Ability("raven_basic", ...);  // 메모리 할당
-
-Player player2 = new Player();
-player2.abilities[0] = new Ability("raven_basic", ...);  // 중복 할당
-```
-
-**개선 (Flyweight 패턴):**
-```java
-// AbilityRegistry (싱글톤)
-public class AbilityRegistry {
-    private static final Map<String, AbilityDefinition> DEFINITIONS = new HashMap<>();
+public class Ability {
+    // 기존 필드...
+    public final float manaCost;         // 마나 비용 (기본값 0)
     
-    static {
-        DEFINITIONS.put("raven_basic", new AbilityDefinition(...));
-        // ... 모든 스킬 정의
+    public Ability(String id, String name, String description, AbilityType type,
+                   float cooldown, float duration, float range, float damage, float manaCost) {
+        // ...
+        this.manaCost = manaCost;
     }
     
-    public static AbilityDefinition get(String id) {
-        return DEFINITIONS.get(id);
+    /**
+     * 스킬 사용 가능 여부 (마나 체크 포함)
+     */
+    public boolean canUse(float currentMana) {
+        return currentCooldown <= 0 && currentMana >= manaCost;
     }
 }
-
-// 사용
-Player player = new Player();
-player.abilities[0] = new AbilityInstance(AbilityRegistry.get("raven_basic"));
-```
-- **메모리 절감**: 스킬 정의는 1번만 로드
-- **로딩 속도**: 게임 시작 시 모든 스킬 미리 로드
-
-### 2. **update() 호출 빈도**
-```java
-// 매 프레임 (60 FPS = 초당 60회) 호출
-public void update(float deltaTime) {
-    if (currentCooldown > 0) {  // 조건 체크
-        currentCooldown = Math.max(0, currentCooldown - deltaTime);
-    }
-    // ...
-}
-```
-- **최적화 불필요**: 간단한 산술 연산이므로 성능 문제 없음
-- **프로파일링 결과**: CPU 사용률 < 0.1%
-
----
-
-## 🧪 테스트 시나리오
-
-### 1. 쿨다운 기본 동작
-```java
-@Test
-public void testCooldownBasic() {
-    Ability ability = new Ability("test", "Test", "Test skill", 
-        AbilityType.BASIC, 5.0f, 0f, 0f, 10f);
-    
-    assertTrue(ability.canUse());  // 초기 상태: 사용 가능
-    
-    ability.activate();
-    assertFalse(ability.canUse());  // 활성화 후: 사용 불가
-    assertEquals(5.0f, ability.getCurrentCooldown(), 0.01f);
-    
-    ability.update(2.5f);  // 2.5초 경과
-    assertEquals(2.5f, ability.getCurrentCooldown(), 0.01f);
-    assertFalse(ability.canUse());
-    
-    ability.update(2.5f);  // 추가 2.5초 (총 5초)
-    assertTrue(ability.canUse());
-    assertEquals(0f, ability.getCurrentCooldown(), 0.01f);
-}
 ```
 
-### 2. 지속형 스킬
+### 5. 스킬 체인/콤보 시스템 (중요도: 낮음)
+**현재 상태**: 각 스킬 독립적
+
+**제안**:
 ```java
-@Test
-public void testDurationSkill() {
-    Ability ability = new Ability("ult", "Ultimate", "Ultimate skill",
-        AbilityType.ULTIMATE, 30f, 5f, 0f, 0f);
+public class Ability {
+    // 기존 필드...
+    public final String[] requiredAbilities; // 사용 전 필요한 스킬 ID 배열
     
-    ability.activate();
-    assertTrue(ability.isActive());
-    assertEquals(5f, ability.getActiveDuration(), 0.01f);
-    
-    ability.update(3f);
-    assertTrue(ability.isActive());
-    assertEquals(2f, ability.getActiveDuration(), 0.01f);
-    
-    ability.update(2f);
-    assertFalse(ability.isActive());  // 자동 비활성화
-    assertEquals(0f, ability.getActiveDuration(), 0.01f);
-}
-```
-
-### 3. 쿨다운 배수
-```java
-@Test
-public void testCooldownMultiplier() {
-    Ability ability = new Ability("skill", "Skill", "Test",
-        AbilityType.TACTICAL, 10f, 0f, 0f, 5f);
-    
-    ability.setCooldownMultiplier(0.5f);  // 50% 쿨다운 감소
-    ability.activate();
-    assertEquals(5f, ability.getCurrentCooldown(), 0.01f);  // 10 * 0.5
-    
-    ability.update(5f);
-    assertTrue(ability.canUse());
-}
-```
-
-### 4. 엣지 케이스
-```java
-@Test
-public void testEdgeCases() {
-    // 즉발 스킬 (duration = 0)
-    Ability instant = new Ability("instant", "Instant", "Test",
-        AbilityType.BASIC, 1f, 0f, 0f, 10f);
-    instant.activate();
-    assertFalse(instant.isActive());  // 즉발 스킬은 활성 상태 없음
-    
-    // 쿨다운 오버플로우 방지
-    Ability ability = new Ability("test", "Test", "Test",
-        AbilityType.BASIC, 5f, 0f, 0f, 10f);
-    ability.update(100f);  // 매우 큰 deltaTime
-    assertEquals(0f, ability.getCurrentCooldown(), 0.01f);  // 음수 안 됨
-}
-```
-
----
-
-## 💡 사용 예시
-
-### 기본 사용법
-```java
-// 1. 스킬 생성
-Ability dashSkill = new Ability(
-    "raven_dash",           // id
-    "전술 대시",             // name
-    "빠르게 전방 돌진",       // description
-    AbilityType.TACTICAL,   // type
-    8.0f,                   // cooldown (8초)
-    0.0f,                   // duration (즉발)
-    0.0f,                   // range
-    0.0f                    // damage
-);
-
-// 2. 게임 루프에서 업데이트
-float deltaTime = 1/60f;  // 60 FPS
-dashSkill.update(deltaTime);
-
-// 3. 플레이어 입력 처리
-if (Input.isKeyPressed('E') && dashSkill.canUse()) {
-    dashSkill.activate();
-    player.performDash();  // 실제 대시 동작
-}
-
-// 4. UI 표시
-if (dashSkill.isReady()) {
-    ui.drawSkillIcon(dashSkill, Color.GREEN);
-} else {
-    float percent = dashSkill.getCooldownPercent();
-    ui.drawCooldownOverlay(dashSkill, percent);
-}
-```
-
-### 버프 시스템 연동
-```java
-// 캐릭터 패시브: 쿨다운 20% 감소
-class RavenCharacter {
-    private Ability[] abilities;
-    
-    public void applyPassive() {
-        for (Ability ability : abilities) {
-            ability.setCooldownMultiplier(0.8f);  // 80% 쿨다운
-        }
-    }
-}
-
-// 아이템 효과: 일시적 쿨다운 가속
-class CooldownItem {
-    public void use(Player player) {
-        for (Ability ability : player.getAbilities()) {
-            ability.setCooldownMultiplier(0.5f);  // 50% 쿨다운
+    /**
+     * 스킬 콤보 체크
+     * @param usedAbilities 최근 사용한 스킬 ID 목록
+     * @return 콤보 조건 충족 여부
+     */
+    public boolean checkCombo(List<String> usedAbilities) {
+        if (requiredAbilities == null || requiredAbilities.length == 0) {
+            return true; // 콤보 조건 없음
         }
         
-        // 10초 후 원래대로
-        Timer timer = new Timer();
-        timer.schedule(new TimerTask() {
-            public void run() {
-                for (Ability ability : player.getAbilities()) {
-                    ability.setCooldownMultiplier(1.0f);
-                }
+        for (String required : requiredAbilities) {
+            if (!usedAbilities.contains(required)) {
+                return false;
             }
-        }, 10000);
+        }
+        return true;
     }
+}
+
+// 예시: Wildcat "광폭화" (돌파 사격 후 사용 가능)
+new Ability("wild_berserk", "광폭화", "이동속도 및 공격력 증가",
+    Ability.AbilityType.ULTIMATE, 25f, 6f, 0f, 0f,
+    new String[] { "wild_breach" }); // 돌파 사격 필요
+```
+
+### 6. 스킬 레벨/업그레이드 시스템 (중요도: 낮음)
+**현재 상태**: 고정 스킬 수치
+
+**제안**:
+```java
+public class Ability {
+    // 기존 필드...
+    private int level = 1;                // 스킬 레벨 (1~5)
+    
+    /**
+     * 스킬 업그레이드
+     */
+    public void upgrade() {
+        if (level < 5) {
+            level++;
+            // 레벨에 따라 수치 증가
+            // (cooldown 감소, damage 증가 등)
+        }
+    }
+    
+    /**
+     * 레벨에 따른 데미지 계산
+     */
+    public float getEffectiveDamage() {
+        return damage * (1 + (level - 1) * 0.1f); // 레벨당 +10%
+    }
+    
+    /**
+     * 레벨에 따른 쿨다운 계산
+     */
+    public float getEffectiveCooldown() {
+        return cooldown * (1 - (level - 1) * 0.05f); // 레벨당 -5%
+    }
+}
+```
+
+### 7. 스킬 이펙트 콜백 (중요도: 중간)
+**현재 상태**: 스킬 로직이 GamePanel에 하드코딩
+
+**제안**:
+```java
+public class Ability {
+    // 기존 필드...
+    private Runnable onActivate;   // 활성화 시 호출
+    private Runnable onDeactivate; // 비활성화 시 호출
+    
+    public void setOnActivate(Runnable callback) {
+        this.onActivate = callback;
+    }
+    
+    public void setOnDeactivate(Runnable callback) {
+        this.onDeactivate = callback;
+    }
+    
+    public void activate() {
+        if (currentCooldown <= 0) {
+            // ... (기존 로직)
+            
+            if (onActivate != null) {
+                onActivate.run(); // 콜백 실행
+            }
+        }
+    }
+    
+    public void deactivate() {
+        isActive = false;
+        activeDuration = 0;
+        
+        if (onDeactivate != null) {
+            onDeactivate.run(); // 콜백 실행
+        }
+    }
+}
+
+// 사용 예시
+ravenDash.setOnActivate(() -> {
+    // 대쉬 이펙트 표시
+    showEffect(player.x, player.y, "dash_start");
+    playSoundEffect("dash.wav");
+});
+
+ravenDash.setOnDeactivate(() -> {
+    // 대쉬 종료 이펙트
+    showEffect(player.x, player.y, "dash_end");
+});
+```
+
+### 8. 쿨다운 세밀한 정보 (중요도: 낮음)
+**현재 상태**: `getCooldownPercent()` 하나뿐
+
+**제안**:
+```java
+/**
+ * 쿨다운 남은 시간
+ */
+public float getRemainingCooldown() {
+    return currentCooldown;
+}
+
+/**
+ * 쿨다운 경과 시간
+ */
+public float getElapsedCooldown() {
+    return cooldown - currentCooldown;
+}
+
+/**
+ * 쿨다운 경과 퍼센트 (0.0 ~ 1.0)
+ * UI에서 "채워지는" 게이지 표시용
+ */
+public float getCooldownElapsedPercent() {
+    return cooldown > 0 ? getElapsedCooldown() / cooldown : 1.0f;
 }
 ```
 
 ---
 
-## 📚 학습 포인트
+## 📊 코드 품질 평가
 
-### 초급 (Beginner)
-1. **Enum 활용법**
-   - 스킬 타입을 `int` 대신 `enum`으로 표현
-   - 타입 안전성과 가독성 향상
+| 항목 | 점수 | 설명 |
+|------|------|------|
+| **단순성** | ⭐⭐⭐⭐⭐ | 107줄, 명확한 로직 |
+| **캡슐화** | ⭐⭐⭐⭐☆ | 불변 속성 + private 상태, 일부 public 필드 |
+| **deltaTime 처리** | ⭐⭐⭐⭐⭐ | 프레임 독립적 업데이트 완벽 |
+| **확장성** | ⭐⭐⭐☆☆ | 쿨다운 배수 시스템 좋음, 콜백 없음 |
+| **UI 연동** | ⭐⭐⭐⭐⭐ | getCooldownPercent(), isActive() 등 완벽 |
+| **에러 처리** | ⭐⭐⭐☆☆ | activate() 반환값 없음, 배수 검증 부족 |
 
-2. **final 키워드**
-   - 불변 필드는 `final`로 선언
-   - 생성자에서만 초기화 가능
-
-3. **접근 제어자**
-   - `public`: 외부 접근 가능 (id, name, type 등)
-   - `private`: 내부 상태 보호 (currentCooldown 등)
-
-### 중급 (Intermediate)
-1. **상태 관리 패턴**
-   - 불변 속성 (정의) vs 가변 상태 (런타임)
-   - `isActive`, `currentCooldown` 등 상태 변수
-
-2. **방어적 프로그래밍**
-   - `activate()`에서 다중 조건 검사
-   - `Math.max(0, ...)로 음수 방지
-
-3. **퍼센트 계산**
-   - `getCooldownPercent()`로 UI 친화적 데이터 제공
-   - 0 나누기 방지 (`cooldown > 0` 체크)
-
-### 고급 (Advanced)
-1. **객체 설계 원칙**
-   - 불변 정의와 가변 상태 분리 (Flyweight 패턴)
-   - 단일 책임 원칙 (각 메서드가 하나의 역할)
-
-2. **메모리 최적화**
-   - 스킬 정의 공유로 메모리 절약
-   - 플레이어마다 상태만 별도 관리
-
-3. **확장 가능한 설계**
-   - `cooldownMultiplier`로 버프 시스템 지원
-   - 추가 필드 없이 기능 확장 가능
+**총점: 4.2 / 5.0** ⭐⭐⭐⭐☆
 
 ---
 
-## 🎓 종합 평가
+## 🎓 결론
 
-| 평가 항목 | 점수 | 설명 |
-|---------|------|------|
-| **코드 가독성** | ⭐⭐⭐⭐⭐ | 명확한 변수명, 적절한 주석 |
-| **유지보수성** | ⭐⭐⭐⭐ | 단일 책임, 메서드 분리 잘됨 |
-| **확장성** | ⭐⭐⭐⭐ | cooldownMultiplier로 버프 지원 |
-| **성능** | ⭐⭐⭐⭐⭐ | 경량 클래스, 최적화 불필요 |
-| **안정성** | ⭐⭐⭐ | 입력 검증 부족, 방어 코드 필요 |
-| **설계 품질** | ⭐⭐⭐⭐ | 불변/가변 분리 미흡, 전반적으로 양호 |
+Ability.java는 **단순하고 효율적인 스킬 시스템**입니다. 특히 **deltaTime 기반 쿨다운 관리**, **자동 비활성화**, **UI 친화적 메서드**가 인상적입니다.
 
-**평균 점수: 4.17 / 5.0**
+### 주요 성과
+1. ✅ **deltaTime 기반**: 프레임 독립적 업데이트 (60fps, 30fps 동일)
+2. ✅ **불변 설계**: 스킬 정의는 final, 런타임 상태는 private
+3. ✅ **자동 비활성화**: 지속 시간 종료 시 자동으로 deactivate()
+4. ✅ **쿨다운 배수**: cooldownMultiplier로 버프/디버프 구현
+5. ✅ **UI 연동**: getCooldownPercent(), isActive() 즉시 사용 가능
 
----
+### 개선 방향
+1. **activate() 반환값**: boolean으로 성공/실패 피드백
+2. **쿨다운 배수 검증**: 0.1 ~ 5.0 범위 제한
+3. **중복 메서드 제거**: canUse() vs isReady() 통합
+4. **콜백 시스템**: onActivate, onDeactivate 추가
 
-## 🚀 우선순위 개선 사항
-
-### 🔴 HIGH Priority
-1. **불변 객체 패턴 완성**
-   - `AbilityDefinition` (불변) + `AbilityInstance` (가변) 분리
-   - 메모리 효율 향상, 멀티플레이어 지원
-
-2. **입력 검증 추가**
-   - 생성자에서 `null` 체크, 음수 값 검증
-   - `IllegalArgumentException` 던지기
-
-### 🟡 MEDIUM Priority
-3. **setCooldownMultiplier 범위 제한**
-   - 0.1 ~ 10.0 범위로 제한
-   - 극단적 값 방지
-
-4. **중복 메서드 제거**
-   - `canUse()`와 `isReady()` 통합 또는 역할 분리
-
-### 🟢 LOW Priority
-5. **문서화 강화**
-   - JavaDoc에 예제 코드 추가
-   - 매개변수 범위 명시
-
----
-
-## 📖 참고 자료
-
-### 디자인 패턴
-- **Flyweight Pattern**: [Refactoring Guru](https://refactoring.guru/design-patterns/flyweight)
-- **Value Object**: [Martin Fowler](https://martinfowler.com/bliki/ValueObject.html)
-
-### Java Best Practices
-- **Effective Java** (Joshua Bloch) - Item 17: Minimize Mutability
-- **Clean Code** (Robert C. Martin) - Chapter 10: Classes
-
-### 게임 개발
-- **Game Programming Patterns** (Robert Nystrom) - State Pattern
-- **게임 스킬 시스템 설계**: [Gamasutra Article](https://www.gamedeveloper.com/)
-
----
-
-## 🎯 결론
-
-`Ability.java`는 **간단하면서도 효과적인 스킬 시스템의 기초**를 제공합니다. 코드 가독성이 뛰어나고, 기본적인 게임 메커닉을 잘 지원합니다. 
-
-**주요 개선점**은 불변 객체 패턴 완성과 입력 검증 강화입니다. 이를 통해 멀티플레이어 환경과 복잡한 버프 시스템을 더욱 안정적으로 지원할 수 있습니다.
-
-전반적으로 **초중급 개발자가 참고하기 좋은 깔끔한 코드**이며, 제안된 개선 사항을 적용하면 **프로덕션 레벨의 코드**로 발전할 수 있습니다.
+**프로덕션 레벨**이며, 작은 개선만으로 **완벽한 스킬 시스템**이 될 것입니다. 🎉
