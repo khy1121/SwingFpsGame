@@ -16,7 +16,7 @@ import javax.swing.*;
  * 게임 패널 - 기존 디자인 유지하면서 간단한 로직
  * 예제 코드처럼 단순한 게임 화면
  * 
- * 리팩토링: GameState를 사용하여 게임 상태 관리 분리
+ * 리팩토링: GameState, NetworkClient, GameRenderer 사용하여 책임 분리
  */
 public class GamePanel extends JFrame implements KeyListener {
 
@@ -29,6 +29,9 @@ public class GamePanel extends JFrame implements KeyListener {
     
     // 네트워크 통신 관리 (리팩토링)
     private final NetworkClient networkClient;
+    
+    // 렌더링 관리 (리팩토링)
+    private final GameRenderer gameRenderer;
 
     // Backward compatibility - keep fields but sync with gameState
     private final String playerName;
@@ -1169,6 +1172,9 @@ public class GamePanel extends JFrame implements KeyListener {
         // NetworkClient 초기화
         this.networkClient = new NetworkClient(socket, out, in);
         this.networkClient.setOnMessageReceived(this::processGameMessage);
+        
+        // GameRenderer 초기화
+        this.gameRenderer = new GameRenderer();
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";

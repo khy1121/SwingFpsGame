@@ -48,6 +48,14 @@ public class GameRenderer {
         this.skillEffects = new SkillEffectManager();
     }
     
+    /**
+     * 기본 생성자 - 렌더링 시 필요한 정보는 render() 메서드 파라미터로 전달
+     */
+    public GameRenderer() {
+        this.canvas = null;
+        this.skillEffects = new SkillEffectManager();
+    }
+    
     // Setters
     public void setMapImage(BufferedImage image) { this.mapImage = image; }
     public void setSkillEffects(SkillEffectManager effects) { this.skillEffects = effects; }
