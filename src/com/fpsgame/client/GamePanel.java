@@ -169,7 +169,7 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private RoundState roundState = RoundState.WAITING;
-    private int roundCount = 1;
+    private int roundCount = 0;
     private int redWins = 0;
     private int blueWins = 0;
     private long roundStartTime = 0;
