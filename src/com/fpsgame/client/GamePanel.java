@@ -21,7 +21,7 @@ import javax.swing.*;
 public class GamePanel extends JFrame implements KeyListener {
 
     // 게임 상태 관리 객체 (리팩토링)
-    private final GameState gameState;
+    final GameState gameState;
     
     private final Socket socket;
     private final DataOutputStream out;
@@ -32,19 +32,22 @@ public class GamePanel extends JFrame implements KeyListener {
     
     // 렌더링 관리 (리팩토링)
     private final GameRenderer gameRenderer;
+    
+    // 메시지 처리 관리 (리팩토링)
+    private final GameMessageHandler messageHandler;
 
     // Backward compatibility - keep fields but sync with gameState
-    private final String playerName;
-    private final int team;
+    final String playerName;
+    final int team;
     
     private javax.swing.Timer timer;
-    private int playerX = 400;
-    private int playerY = 300;
+    int playerX = 400;
+    int playerY = 300;
     private final int SPEED = 5;
     private final boolean[] keys = new boolean[256];
 
     // 스킬 시스템 (매 프레임 update 필요하므로 로컬 유지)
-    private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
+    Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
 
     // 스킬 이펙트 (네트워크 포함)
     public static class ActiveEffect {
@@ -72,10 +75,10 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     // 다른 플레이어 이펙트, 내 이펙트
-    private final Map<String, java.util.List<ActiveEffect>> effectsByPlayer = new HashMap<>();
-    private final java.util.List<ActiveEffect> myEffects = new ArrayList<>();
+    final Map<String, java.util.List<ActiveEffect>> effectsByPlayer = new HashMap<>();
+    final java.util.List<ActiveEffect> myEffects = new ArrayList<>();
     // Structured skill effects
-    private final SkillEffectManager skillEffects = new SkillEffectManager();
+    final SkillEffectManager skillEffects = new SkillEffectManager();
 
     // Raven 전용 런타임 상태(첫 캐릭터 구현 시작점)
     private float ravenDashRemaining = 0f;
@@ -89,10 +92,10 @@ public class GamePanel extends JFrame implements KeyListener {
     private float teamThermalRemaining = 0f;
 
     // 다른 플레이어들
-    private Map<String, PlayerData> players = new HashMap<>();
+    final Map<String, PlayerData> players = new HashMap<>();
 
     // 미사일 리스트
-    private final List<Missile> missiles = new ArrayList<>();
+    final List<Missile> missiles = new ArrayList<>();
 
     // 게임 패널
     private GameCanvas canvas;
@@ -120,7 +123,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private int mapHeight = 2400; // 화면의 4배
     private int cameraX = 0; // 카메라 위치 (플레이어 중심)
     private int cameraY = 0;
-    private String currentMapName = "map"; // 기본 맵 (map.png 사용)
+    String currentMapName = "map"; // 기본 맵 (map.png 사용)
     // 타일 그리드
     private static final int TILE_SIZE = 32;
     private boolean[][] walkableGrid; // true = 이동 가능
@@ -156,35 +159,35 @@ public class GamePanel extends JFrame implements KeyListener {
     private SpriteAnimation[] myAnimations;
 
     // 설치된 오브젝트 (지뢰, 터렛)
-    private final Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
+    final Map<Integer, PlacedObjectClient> placedObjects = new HashMap<>();
 
     // 에어스트라이크 마커
-    private final Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
+    final Map<Integer, StrikeMarker> strikeMarkers = new HashMap<>();
 
     // General 궁극기: 미니맵 타겟팅 대기 상태
     private boolean awaitingMinimapTarget = false;
 
     // 버프 상태 (gen_aura 등)
-    private float moveSpeedMultiplier = 1.0f;
-    private float attackSpeedMultiplier = 1.0f;
+    float moveSpeedMultiplier = 1.0f;
+    float attackSpeedMultiplier = 1.0f;
 
     // 라운드 시스템
     public enum RoundState {
         WAITING, PLAYING, ENDED
     }
 
-    private RoundState roundState = RoundState.WAITING;
-    private int roundCount = 0;
-    private int redWins = 0;
-    private int blueWins = 0;
-    private long roundStartTime = 0;
+    RoundState roundState = RoundState.WAITING;
+    int roundCount = 0;
+    int redWins = 0;
+    int blueWins = 0;
+    long roundStartTime = 0;
     private static final int MAX_ROUNDS = 3; // 3판 2선승
     public static final int ROUND_READY_TIME = 10000; // 10초 대기
-    private String centerMessage = "";
-    private long centerMessageEndTime = 0;
+    String centerMessage = "";
+    long centerMessageEndTime = 0;
 
     // 캐릭터 선택 제한 관련 변수
-    private boolean hasChangedCharacterInRound = false;
+    boolean hasChangedCharacterInRound = false;
     private static final long CHARACTER_CHANGE_TIME_LIMIT = 10000; // 10초
 
     class PlacedObjectClient {
@@ -463,6 +466,9 @@ public class GamePanel extends JFrame implements KeyListener {
         
         // GameRenderer 초기화 - 파라미터 없는 생성자 사용
         this.gameRenderer = new GameRenderer();
+        
+        // GameMessageHandler 초기화
+        this.messageHandler = new GameMessageHandler(this);
 
         // 전달받은 캐릭터 ID 사용 (null이면 기본값)
         String selectedChar = (characterId != null && !characterId.isEmpty()) ? characterId : "raven";
@@ -645,7 +651,7 @@ public class GamePanel extends JFrame implements KeyListener {
     private long lastChatTime = 0L;
     private static final long CHAT_THROTTLE_MS = 1000;
 
-    private void appendChatMessage(String message) {
+    void appendChatMessage(String message) {
         long now = System.currentTimeMillis();
         if (message != null && message.equals(lastChatMessage) && (now - lastChatTime) < CHAT_THROTTLE_MS) {
             return; // 동일 메시지 연속 출력 최소화
@@ -661,7 +667,7 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * 맵 로드 및 장애물 설정
      */
-    private void loadMap(String mapName) {
+    void loadMap(String mapName) {
         try {
             // 맵 이미지 로드 (assets/maps/ 경로)
             java.io.File mapFile = new java.io.File("assets/maps/" + mapName + ".png");
@@ -1613,7 +1619,7 @@ public class GamePanel extends JFrame implements KeyListener {
         }
     }
 
-    private void respawn() {
+    void respawn() {
         // 반드시 지정된 스폰 타일 중에서만 랜덤 스폰
         java.util.List<int[]> tiles = (team == GameConstants.TEAM_RED ? redSpawnTiles : blueSpawnTiles);
         if (tiles != null && !tiles.isEmpty()) {
@@ -1683,593 +1689,29 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void processGameMessage(String message) {
-        String[] parts = message.split(":", 2);
-        if (parts.length < 2)
-            return;
+        messageHandler.handleMessage(message);
+    }
 
-        String command = parts[0];
-        String data = parts[1];
-
-        switch (command) {
-            case "CHAT":
-                // 채팅 메시지 표시 (서버에서 받은 모든 메시지 표시)
-                appendChatMessage(data);
-                break;
-
-            case "CHARACTER_SELECT":
-                // CHARACTER_SELECT: 플레이어 이름, 캐릭터 ID
-                String[] cs = data.split(",");
-                if (cs.length >= 2) {
-                    String pName = cs[0];
-                    String charId = cs[1];
-                    com.fpsgame.common.CharacterData cd = com.fpsgame.common.CharacterData.getById(charId);
-                    int newMaxHp = (int) cd.health;
-
-                    if (pName.equals(playerName)) {
-                        // GameState에 캐릭터 정보 설정
-                        gameState.setSelectedCharacter(charId);
-                        gameState.setCurrentCharacterData(cd);
-                        gameState.setMyMaxHP(newMaxHp);
-                        gameState.setMyHP(newMaxHp);
-                        
-                        // 스킬 재생성 (로컬 유지)
-                        abilities = CharacterData.createAbilities(charId);
-                        gameState.setAbilities(abilities);
-                        hasChangedCharacterInRound = true;
-                        
-                        // 선택한 캐릭터 저장 (게임 중 변경사항 지속)
-                        GameConfig.saveCharacter(charId);
-                        
-                        // 내 스프라이트 재로드
-                        loadSprites();
-                        // 스프라이트가 제대로 로드되었는지 확인
-                        System.out.println("[CHARACTER_SELECT] 캐릭터 변경: " + charId + ", maxHP: " + newMaxHp + ", 현재 HP: " + gameState.getMyHP() + ")");
-                        repaint();
-                        appendChatMessage("[캐릭터] " + cd.name + "으로 변경되었습니다.");
-                    } else {
-                        PlayerData pd = players.get(pName);
-                        if (pd == null) {
-                            // 플레이어가 아직 없으면 생성 (위치는 나중에 PLAYER 메시지로 업데이트됨)
-                            pd = new PlayerData(0, 0, GameConstants.TEAM_RED); // 임시 위치
-                            pd.characterId = charId;
-                            pd.maxHp = newMaxHp;
-                            pd.hp = newMaxHp;
-                            players.put(pName, pd);
-                        } else {
-                            pd.characterId = charId;
-                            pd.maxHp = newMaxHp;
-                            pd.hp = newMaxHp; // HP도 즉시 업데이트
-                        }
-                        // 원격 플레이어 스프라이트 로드
-                        loadPlayerSprites(pd, charId);
-                        System.out.println(
-                                "[CHARACTER_SELECT] 원격 플레이어: " + pName + " -> " + charId + ", HP: " + newMaxHp);
-                        appendChatMessage("[캐릭터] " + pName + " -> " + cd.name);
-                    }
-                }
-                break;
-
-            case "PLAYER":
-                // PLAYER:name,x,y,team,hp,characterId,direction
-                String[] playerData = data.split(",");
-                if (playerData.length >= 5) {
-                    String name = playerData[0];
-                    if (!name.equals(playerName)) {
-                        int x = (int) Float.parseFloat(playerData[1]);
-                        int y = (int) Float.parseFloat(playerData[2]);
-                        int t = Integer.parseInt(playerData[3]);
-                        int hp = Integer.parseInt(playerData[4]);
-                        String charId = (playerData.length >= 6) ? playerData[5] : "raven";
-                        int direction = (playerData.length >= 7) ? Integer.parseInt(playerData[6]) : 0;
-
-                        PlayerData pd = players.get(name);
-                        if (pd == null) {
-                            pd = new PlayerData(x, y, t);
-                            pd.hp = hp;
-                            pd.characterId = charId;
-                            pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                            pd.direction = direction; // 방향 설정
-                            players.put(name, pd);
-                            // 스프라이트 로드
-                            loadPlayerSprites(pd, charId);
-                            System.out
-                                    .println("[PLAYER] 새 플레이어 생성: " + name + ", 캐릭터: " + charId + ", 방향: " + direction);
-                        } else {
-                            // 보간을 위해 목표 위치 설정 (즉시 이동하지 않음)
-                            pd.targetX = x;
-                            pd.targetY = y;
-                            pd.hp = hp;
-                            pd.direction = direction; // 방향 업데이트
-
-                            // 캐릭터 ID가 변경되었거나 스프라이트가 로드되지 않았으면 로드
-                            if (charId != null && (!charId.equalsIgnoreCase(pd.characterId) || pd.animations == null)) {
-                                pd.characterId = charId;
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                                loadPlayerSprites(pd, charId);
-                                System.out
-                                        .println("[PLAYER] 캐릭터 변경: " + name + " -> " + charId + ", maxHP: " + pd.maxHp);
-                            } else if (charId != null) {
-                                // 캐릭터 변경이 없어도 maxHp 업데이트 (동기화 보장)
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(charId).health;
-                            }
-                        }
-                    }
-                }
-                break;
-
-            case "REMOVE":
-                // 플레이어 제거
-                players.remove(data);
-                break;
-
-            case "KILL":
-                // 처치 알림(스탯 증가는 서버에서 STATS로 동기화)
-                appendChatMessage(">>> 당신이 " + data + "를 처치했습니다!");
-                break;
-
-            case "STATS":
-                // STATS:name,kills,deaths,hp,characterId
-                String[] s = data.split(",");
-                if (s.length >= 4) {
-                    String name = s[0];
-                    int k = Integer.parseInt(s[1]);
-                    int d = Integer.parseInt(s[2]);
-                    int hp = Integer.parseInt(s[3]);
-                    // characterId는 포함되어 있으나, 검증용으로만 사용 (절대 캐릭터 변경하지 않음)
-                    // String charId = s.length >= 5 ? s[4] : null; // 읽지만 사용하지 않음
-
-                    if (name.equals(playerName)) {
-                        // ===== 내 캐릭터: HP/kills/deaths만 업데이트 =====
-                        gameState.setKills(k);
-                        gameState.setDeaths(d);
-                        gameState.setMyHP(hp);
-                        
-                        // maxHP는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
-                        CharacterData currentChar = gameState.getCurrentCharacterData();
-                        if (currentChar != null) {
-                            gameState.setMyMaxHP((int) currentChar.health);
-                        }
-
-                        System.out.println("[STATS] " + playerName + " HP: " + gameState.getMyHP() + "/" + gameState.getMyMaxHP() + " (Character: " + gameState.getSelectedCharacter() + ")");
-
-                        // 서버 기준으로 사망 상태면 즉시 리스폰
-                        if (gameState.getMyHP() <= 0) {
-                            respawn();
-                        }
-                    } else {
-                        // ===== 원격 플레이어: HP/kills/deaths만 업데이트 =====
-                        PlayerData pd = players.get(name);
-                        if (pd != null) {
-                            pd.kills = k;
-                            pd.deaths = d;
-                            pd.hp = hp;
-
-                            // maxHp는 현재 캐릭터 기준으로 유지 (캐릭터 변경 없음)
-                            if (pd.characterId != null) {
-                                pd.maxHp = (int) com.fpsgame.common.CharacterData.getById(pd.characterId).health;
-                            }
-                            
-                            System.out.println("[STATS] " + name + " HP: " + pd.hp + "/" + pd.maxHp + " (Character: " + pd.characterId + ")");
-                        }
-                    }
-                }
-                break;
-
-            case "SHOOT":
-                // SHOOT:playerName,x,y,dx,dy
-                String[] shootData = data.split(",");
-                if (shootData.length >= 5) {
-                    String shooter = shootData[0];
-                    if (!shooter.equals(playerName)) {
-                        int sx = (int) Float.parseFloat(shootData[1]);
-                        int sy = (int) Float.parseFloat(shootData[2]);
-                        int dx = (int) Float.parseFloat(shootData[3]);
-                        int dy = (int) Float.parseFloat(shootData[4]);
-
-                        // 다른 플레이어가 발사한 미사일 생성
-                        PlayerData pd = players.get(shooter);
-                        if (pd != null) {
-                            Missile m = new Missile(sx, sy, dx, dy, pd.team, shooter);
-                            missiles.add(m);
-                            // 원격 총구 섬광 이펙트 (발사 방향 기반)
-                            double ang = Math.atan2(dy, dx);
-                            skillEffects.addForPlayer(shooter, new MuzzleFlashEffect(ang));
-                        }
-                    }
-                }
-                break;
-
-            case "SKILL": {
-                // SKILL:playerName,abilityId,type,duration
-                String[] sd = data.split(",");
-                if (sd.length >= 4) {
-                    String user = sd[0];
-                    String abilityId = sd[1];
-                    String type = sd[2];
-                    float duration = 0.4f;
-                    try {
-                        duration = Float.parseFloat(sd[3]);
-                    } catch (NumberFormatException ignored) {
-                    }
-                    if (!user.equals(playerName)) {
-                        effectsByPlayer.computeIfAbsent(user, k -> new ArrayList<>())
-                                .add(new ActiveEffect(abilityId, type, Math.max(0.2f, duration)));
-                        // 구조화된 SkillEffect 등록 (원격 플레이어 시각 효과)
-                        if ("piper_mark".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new PiperMarkEffect(duration));
-                        } else if ("piper_thermal".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new PiperThermalEffect(duration));
-                        } else if ("raven_dash".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new RavenDashEffect(duration));
-                        } else if ("raven_overcharge".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new RavenOverchargeEffect(duration));
-                        } else if ("gen_aura".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GeneralAuraEffect(duration));
-                        } else if ("gen_strike".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GeneralStrikeEffect(duration));
-                            // } else if ("bull_cover".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new BulldogCoverEffect(duration));
-                            // } else if ("bull_barrage".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new BulldogBarrageEffect(duration));
-                            // } else if ("wild_breach".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new WildcatBreachEffect(duration));
-                            // } else if ("wild_berserk".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new WildcatBerserkEffect(duration));
-                        } else if ("ghost_cloak".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GhostCloakEffect(duration));
-                        } else if ("ghost_nullify".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new GhostNullifyEffect(duration));
-                        } else if ("skull_adrenaline".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SkullAdrenalineEffect(duration));
-                        } else if ("skull_ammo".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SkullAmmoEffect(duration));
-                            // } else if ("steam_emp".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new SteamEmpEffect(duration));
-                            // } else if ("steam_reset".equals(abilityId)) {
-                            // skillEffects.addForPlayer(user, new SteamResetEffect(duration));
-                        } else if ("tech_mine".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new TechMineEffect(duration));
-                        } else if ("tech_turret".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new TechTurretEffect(duration));
-                        } else if ("sage_heal".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SageHealEffect(duration));
-                        } else if ("sage_revive".equals(abilityId)) {
-                            skillEffects.addForPlayer(user, new SageReviveEffect(duration));
-                        }
-                        // 같은 팀 Piper 마킹/열감지 공유
-                        PlayerData pdUser = players.get(user);
-                        if (pdUser != null && pdUser.team == team) {
-                            if ("piper_mark".equalsIgnoreCase(abilityId)) {
-                                teamMarkRemaining = Math.max(teamMarkRemaining, duration);
-                            } else if ("piper_thermal".equalsIgnoreCase(abilityId)) {
-                                teamThermalRemaining = Math.max(teamThermalRemaining, duration);
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-            case "TURRET_SHOOT": {
-                // TURRET_SHOOT:objId,tx,ty,targetName
-                String[] ts = data.split(",");
-                if (ts.length >= 4) {
-                    try {
-                        int turretId = Integer.parseInt(ts[0]);
-                        int tx = Integer.parseInt(ts[1]);
-                        int ty = Integer.parseInt(ts[2]);
-                        String targetName = ts[3];
-                        PlacedObjectClient turret = placedObjects.get(turretId);
-                        // 타겟 플레이어 객체가 없어도(예: 나 자신, 혹은 시야 밖) 좌표 기반으로 발사
-                        if (turret != null) {
-                            // Turret fires a missile toward target
-                            int sx = turret.x;
-                            int sy = turret.y;
-                            int dx = tx - sx;
-                            int dy = ty - sy;
-                            double distance = Math.sqrt(dx * dx + dy * dy);
-                            if (distance > 0) {
-                                int speed = 8;
-                                int missileVx = (int) (dx / distance * speed);
-                                int missileVy = (int) (dy / distance * speed);
-                                Missile m = new Missile(sx, sy, missileVx, missileVy, turret.team, "TURRET");
-                                missiles.add(m);
-                            }
-                            // Optional: turret muzzle flash effect
-                            double ang = Math.atan2(dy, dx);
-                            if (skillEffects != null)
-                                skillEffects.addForObject(turretId, new TurretShootEffect(ang));
-                        }
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "PLACE": {
-                // PLACE:objId,type,x,y,hp,maxHp,owner,team
-                String[] placeParts = data.split(",");
-                if (placeParts.length >= 8) {
-                    try {
-                        int id = Integer.parseInt(placeParts[0]);
-                        String type = placeParts[1];
-                        int x = Integer.parseInt(placeParts[2]);
-                        int y = Integer.parseInt(placeParts[3]);
-                        int hp = Integer.parseInt(placeParts[4]);
-                        int maxHp = Integer.parseInt(placeParts[5]);
-                        String owner = placeParts[6];
-                        int objTeam = Integer.parseInt(placeParts[7]);
-
-                        PlacedObjectClient obj = new PlacedObjectClient(id, type, x, y, hp, maxHp, owner, objTeam);
-                        placedObjects.put(id, obj);
-                        appendChatMessage("[오브젝트] " + owner + " 님이 " + type + " 설치!");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "OBJ_UPDATE": {
-                // OBJ_UPDATE:objId,hp
-                String[] updateParts = data.split(",");
-                if (updateParts.length >= 2) {
-                    try {
-                        int id = Integer.parseInt(updateParts[0]);
-                        int hp = Integer.parseInt(updateParts[1]);
-                        PlacedObjectClient obj = placedObjects.get(id);
-                        if (obj != null) {
-                            obj.hp = hp;
-                        }
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "OBJ_DESTROY": {
-                // OBJ_DESTROY:objId
-                // 라운드 종료 시 오브젝트 일괄 제거
-                try {
-                    int id = Integer.parseInt(data);
-                    PlacedObjectClient obj = placedObjects.remove(id);
-                    if (obj != null) {
-                        appendChatMessage("[오브젝트] " + obj.type + " 파괴됨!");
-                    }
-                } catch (NumberFormatException ignored) {
-                }
-                break;
-            }
-
-            case "BUFF": {
-                // BUFF:targetName,abilityId,moveSpeedMult,attackSpeedMult,durationRemaining
-                String[] buffParts = data.split(",");
-                if (buffParts.length >= 5 && buffParts[0].equals(playerName)) {
-                    try {
-                        moveSpeedMultiplier = Float.parseFloat(buffParts[2]);
-                        attackSpeedMultiplier = Float.parseFloat(buffParts[3]);
-
-                        // 공격속도 버프를 abilities[0] 쿨다운에 적용 (attackSpeedMultiplier가 1.15라면 쿨다운은 1/1.15 =
-                        // 0.87로 단축)
-                        if (abilities != null && abilities.length > 0) {
-                            abilities[0].setCooldownMultiplier(1f / attackSpeedMultiplier);
-                        }
-
-                        appendChatMessage("[버프] 오라 버프 활성! (이동속도 +" + ((moveSpeedMultiplier - 1) * 100) + "%, 공격속도 +"
-                                + ((attackSpeedMultiplier - 1) * 100) + "%)");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "UNBUFF": {
-                // UNBUFF:abilityId
-                if ("gen_aura".equals(data)) {
-                    moveSpeedMultiplier = 1.0f;
-                    attackSpeedMultiplier = 1.0f;
-
-                    // 공격속도 버프 해제 (쿨다운 배율 원상복구)
-                    if (abilities != null && abilities.length > 0) {
-                        abilities[0].setCooldownMultiplier(1f);
-                    }
-
-                    appendChatMessage("[버프] 오라 버프 종료");
-                }
-                break;
-            }
-
-            case "STRIKE_MARK": {
-                // STRIKE_MARK:strikeId,x,y
-                String[] markParts = data.split(",");
-                if (markParts.length >= 3) {
-                    try {
-                        int id = Integer.parseInt(markParts[0]);
-                        int x = Integer.parseInt(markParts[1]);
-                        int y = Integer.parseInt(markParts[2]);
-                        StrikeMarker marker = new StrikeMarker(id, x, y);
-                        strikeMarkers.put(id, marker);
-                        appendChatMessage("[에어스트라이크] 타겟 지정됨!");
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "STRIKE_IMPACT": {
-                // STRIKE_IMPACT:strikeId,x,y,radius
-                String[] impactParts = data.split(",");
-                if (impactParts.length >= 4) {
-                    try {
-                        int id = Integer.parseInt(impactParts[0]);
-                        int x = Integer.parseInt(impactParts[1]);
-                        int y = Integer.parseInt(impactParts[2]);
-                        int radius = Integer.parseInt(impactParts[3]);
-
-                        strikeMarkers.remove(id);
-                        appendChatMessage("[에어스트라이크] 임팩트! (" + x + "," + y + ")");
-
-                        // TODO: 임팩트 시각 효과 (폭발 애니메이션)
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                break;
-            }
-
-            case "ROUND_WIN": {
-                // ROUND_WIN:winningTeam,redWins,blueWins
-                String[] roundData = data.split(",");
-                if (roundData.length >= 3) {
-                    int winningTeam = Integer.parseInt(roundData[0]);
-                    redWins = Integer.parseInt(roundData[1]);
-                    blueWins = Integer.parseInt(roundData[2]);
-
-                    String winTeam = (winningTeam == GameConstants.TEAM_RED) ? "RED" : "BLUE";
-                    centerMessage = winTeam + " 팀 승리!";
-                    centerMessageEndTime = System.currentTimeMillis() + 2000;
-                    roundState = RoundState.ENDED;
-
-                    appendChatMessage("[라운드] " + winTeam + " 팀 승리! (점수: " + redWins + " : " + blueWins + ")");
-                }
-                break;
-            }
-
-            case "ROUND_START": {
-                // ROUND_START:roundNumber,mapId;playerCount;name1,charId1,hp1,maxHp1;name2,charId2,hp2,maxHp2;...
-                String[] mainParts = data.split(";", 2);
-                if (mainParts.length >= 1) {
-                    // 기본 라운드 정보 파싱
-                    String[] roundParts = mainParts[0].split(",");
-                    roundCount = Integer.parseInt(roundParts[0]);
-
-                    // 맵 ID가 포함되어 있으면 새 맵 로드 (별도 스레드에서 처리)
-                    if (roundParts.length > 1) {
-                        String newMapId = roundParts[1];
-                        if (!newMapId.equals(currentMapName)) {
-                            final String mapToLoad = newMapId;
-                            new Thread(() -> {
-                                try {
-                                    System.out.println("[맵] 로딩 시작: " + mapToLoad);
-                                    currentMapName = mapToLoad;
-                                    loadMap(mapToLoad);
-                                    SwingUtilities.invokeLater(() -> {
-                                        appendChatMessage("[맵] " + mapToLoad + " 맵으로 변경되었습니다!");
-                                    });
-                                    System.out.println("[맵] 로딩 완료: " + mapToLoad);
-                                } catch (Exception e) {
-                                    System.err.println("[맵] 로딩 실패: " + e.getMessage());
-                                    e.printStackTrace(System.err);
-                                }
-                            }, "MapLoader-Thread").start();
-                        }
-                    }
-
-                    // ===== 라운드 시작 시 서버에서 받은 모든 플레이어 정보로 완전 초기화 =====
-                    if (mainParts.length > 1) {
-                        String[] playerInfo = mainParts[1].split(";");
-                        int playerCount = Integer.parseInt(playerInfo[0]);
-                        
-                        System.out.println("[ROUND_START] Parsing " + playerCount + " players from server");
-                        
-                        for (int i = 1; i <= playerCount && i < playerInfo.length; i++) {
-                            String[] pData = playerInfo[i].split(",");
-                            if (pData.length >= 4) {
-                                String pName = pData[0];
-                                String pCharId = pData[1];
-                                int pHp = Integer.parseInt(pData[2]);
-                                int pMaxHp = Integer.parseInt(pData[3]);
-
-                                System.out.println("[ROUND_START] Player: " + pName + ", Char: " + pCharId + ", HP: " + pHp + "/" + pMaxHp);
-
-                                if (pName.equals(playerName)) {
-                                    // ===== 내 캐릭터 완전 초기화 =====
-                                    gameState.setSelectedCharacter(pCharId);
-                                    gameState.setCurrentCharacterData(com.fpsgame.common.CharacterData.getById(pCharId));
-                                    gameState.setMyHP(pHp);
-                                    gameState.setMyMaxHP(pMaxHp);
-                                    
-                                    // 스프라이트 재로딩
-                                    loadSprites();
-                                    
-                                    // 스킬 재설정
-                                    abilities = CharacterData.createAbilities(pCharId);
-                                    gameState.setAbilities(abilities);
-                                    if (abilities != null) {
-                                        for (Ability ability : abilities) {
-                                            if (ability != null) {
-                                                ability.resetCooldown();
-                                            }
-                                        }
-                                    }
-                                    
-                                    System.out.println("[ROUND_START] My character initialized: " + pCharId + " HP: " + gameState.getMyHP() + "/" + gameState.getMyMaxHP() + ")");
-                                } else {
-                                    // ===== 원격 플레이어 완전 초기화 =====
-                                    PlayerData pd = players.get(pName);
-                                    if (pd != null) {
-                                        pd.characterId = pCharId;
-                                        pd.hp = pHp;
-                                        pd.maxHp = pMaxHp;
-                                        
-                                        // 스프라이트 재로딩
-                                        loadPlayerSprites(pd, pCharId);
-                                        
-                                        System.out.println("[ROUND_START] Remote player updated: " + pName + " -> " + pCharId + " HP: " + pHp + "/" + pMaxHp);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    roundState = RoundState.WAITING;
-                    roundStartTime = System.currentTimeMillis();
-                    centerMessage = "Round " + roundCount + " Ready";
-                    centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
-
-                    // 라운드 시작 시 캐릭터 변경 플래그 초기화
-                    hasChangedCharacterInRound = false;
-
-                    // ===== 스킬 쿨다운 리셋 (라운드 시작 시) =====
-                    if (abilities != null) {
-                        for (Ability ability : abilities) {
-                            if (ability != null) {
-                                ability.resetCooldown();
-                            }
-                        }
-                        System.out.println("[ROUND_START] 모든 스킬 쿨다운 리셋 완료");
-                    }
-
-                    // 라운드 시작 시 오브젝트 및 효과 초기화
-                    placedObjects.clear();
-                    strikeMarkers.clear();
-                    if (effectsByPlayer != null) {
-                        effectsByPlayer.clear();
-                    }
-
-                    // 리스폰
-                    respawn();
-
-                    appendChatMessage("[라운드] Round " + roundCount + " 시작!");
-                }
-                break;
-            }
-
-            case "GAME_OVER": {
-                // GAME_OVER:winningTeamName
-                centerMessage = data + " 팀 최종 승리!";
-                centerMessageEndTime = System.currentTimeMillis() + 5000;
-
-                appendChatMessage("========================================");
-                appendChatMessage("[게임 종료] " + data + " 팀이 최종 승리했습니다!");
-                appendChatMessage("========================================");
-
-                // 5초 후 로비로 복귀
-                javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> {
-                    returnToLobby();
-                });
-                returnTimer.setRepeats(false);
-                returnTimer.start();
-                break;
-            }
+    /**
+     * 로비로 복귀
+     */
+    void returnToLobby() {
+        // 게임 종료
+        if (timer != null) {
+            timer.stop();
         }
+        disconnect();
+
+        // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
+        final String currentChar = gameState.getSelectedCharacter(); // ?? ??? ??
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            this.dispose(); // GamePanel? JFrame??? ?? dispose
+
+            GameConfig.saveCharacter("");
+            System.out.println("[??] ? ?? - ??? ???, ??: " + currentChar);
+            LobbyFrame lobby = new LobbyFrame(playerName);
+            lobby.setVisible(true);
+        });
     }
 
     private void disconnect() {
@@ -2286,29 +1728,6 @@ public class GamePanel extends JFrame implements KeyListener {
             System.err.println("[ERROR] Failed to close network resources");
             ex.printStackTrace(System.err);
         }
-    }
-
-    /**
-     * 로비로 복귀
-     */
-    private void returnToLobby() {
-        // 게임 종료
-        if (timer != null) {
-            timer.stop();
-        }
-        disconnect();
-
-        // 현재 창 닫기 및 로비 열기 (현재 선택된 캐릭터 유지)
-        // ?? ?? ? ???? ????? ?? ????? ??
-        final String currentChar = gameState.getSelectedCharacter(); // ?? ??? ??
-        javax.swing.SwingUtilities.invokeLater(() -> {
-            this.dispose(); // GamePanel? JFrame??? ?? dispose
-
-            GameConfig.saveCharacter("");
-            System.out.println("[??] ? ?? - ??? ???, ??: " + currentChar);
-            LobbyFrame lobby = new LobbyFrame(playerName);
-            lobby.setVisible(true);
-        });
     }
 
     @Override
@@ -2916,7 +2335,7 @@ public class GamePanel extends JFrame implements KeyListener {
     public void keyTyped(KeyEvent e) {
     }
 
-    private void loadSprites() {
+    void loadSprites() {
         try {
             ResourceManager rm = ResourceManager.getInstance();
             myAnimations = new SpriteAnimation[4];
@@ -2997,7 +2416,7 @@ public class GamePanel extends JFrame implements KeyListener {
     /**
      * 원격 플레이어의 스프라이트를 로드합니다
      */
-    private void loadPlayerSprites(PlayerData player, String characterId) {
+    void loadPlayerSprites(PlayerData player, String characterId) {
         try {
             System.out.println("[SPRITE] 시작: " + characterId + " 스프라이트 로딩...");
             
