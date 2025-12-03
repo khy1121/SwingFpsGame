@@ -3505,6 +3505,9 @@ public class GamePanel extends JFrame implements KeyListener {
         roundStartTime = System.currentTimeMillis();
         centerMessage = "Round " + roundCount + " Ready";
         centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+        
+        // 라운드 시작 시 캐릭터 변경 플래그 초기화
+        hasChangedCharacterInRound = false;
 
         // Map rotation is handled by the server's ROUND_START message; do not switch locally.
 
@@ -3512,19 +3515,19 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void openCharacterSelect() {
-        // 1. 라운드 상태 체크 - WAITING 상태가 아니면 변경 불가
-        if (roundState != RoundState.WAITING) {
-            appendChatMessage("[시스템] 라운드 진행 중에는 캐릭터를 변경할 수 없습니다.");
-            return;
-        }
-
-        // 2. 시간 제한 체크 (10초) - 더 엄격하게
+        // 1. 시간 제한 체크 (10초) - 최우선으로 체크
         long now = System.currentTimeMillis();
         long elapsed = now - roundStartTime;
         long remaining = CHARACTER_CHANGE_TIME_LIMIT - elapsed;
         
         if (elapsed >= CHARACTER_CHANGE_TIME_LIMIT) {
             appendChatMessage("[시스템] 캐릭터 변경 가능 시간이 만료되었습니다. (경과: " + (elapsed/1000) + "초)");
+            return;
+        }
+        
+        // 2. 라운드 상태 체크 - WAITING 상태가 아니면 변경 불가
+        if (roundState != RoundState.WAITING) {
+            appendChatMessage("[시스템] 라운드 진행 중에는 캐릭터를 변경할 수 없습니다.");
             return;
         }
         
@@ -3559,6 +3562,16 @@ public class GamePanel extends JFrame implements KeyListener {
         String newCharacter = CharacterSelectDialog.showDialog(this, disabledCharacters, characterOwners, remaining);
 
         if (newCharacter != null) {
+            // 다이얼로그가 닫힌 후 최종 시간 체크 (사용자가 대기하다가 시간 초과 후 선택한 경우 방지)
+            long finalElapsed = System.currentTimeMillis() - roundStartTime;
+            if (finalElapsed >= CHARACTER_CHANGE_TIME_LIMIT) {
+                appendChatMessage("[시스템] 시간이 초과되어 캐릭터 변경이 취소되었습니다.");
+                if (timer != null) {
+                    timer.start();
+                }
+                return;
+            }
+            
             selectedCharacter = newCharacter;
             currentCharacterData = CharacterData.getById(selectedCharacter);
 
