@@ -3,8 +3,9 @@
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/server/GameServer.java`
 - **역할**: 멀티플레이어 게임의 서버 로직 총괄
-- **라인 수**: 1,101줄
-- **주요 기능**: 네트워크 통신, 게임 상태 동기화, 충돌 감지, 라운드 관리, 스킬 처리
+- **라인 수**: ~1,200줄
+- **주요 기능**: 네트워크 통신, 게임 상태 동기화, 충돌 감지, 라운드 관리, 스킬 처리, 맵 랜덤 선택
+- **최근 업데이트**: 캐릭터 변경 제한 강화 (10초/1회), 맵 랜덤 선택, AirStrike 사망 처리 버그 수정
 
 ---
 
@@ -50,13 +51,19 @@ private void processMessage(String message) {
         case "SHOOT": handleShoot(data); break;
         case "SKILL_USE": handleSkillUse(playerName, data); break;
         case "HIT": handleHit(data); break;
+        case "HITME": handleHitMe(data); break;
+        case "HIT_OBJ": handleHitObj(data); break;
         case "CHARACTER_SELECT": handleCharacterSelect(data); break;
-        // ... 10+ 명령어
+        case "PLACE_OBJECT": handlePlaceObject(data); break;
+        case "REMOVE_OBJECT": handleRemoveObject(data); break;
+        case "CHAT": handleChat(data); break;
+        // ... 15+ 명령어
     }
 }
 ```
 - **텍스트 프로토콜**: "명령어:데이터" 형식
 - **확장 가능**: 새 명령어 추가 용이
+- **설치 오브젝트 지원**: 터렛, 지뢰 등 서버 측 관리
 
 ### 3. 게임 상태 동기화
 ```java
@@ -75,29 +82,106 @@ case "MOVE":
 - **브로드캐스트**: 한 플레이어 행동 → 모두에게 전송
 - **실시간 동기화**: 위치, HP, 스킬 사용
 
-### 4. 충돌 감지 및 피해 처리
+### 4. 라운드 시스템 및 맵 관리 ✨
 ```java
-case "HIT":
-    String[] hitParts = data.split(",");
-    String targetName = hitParts[0];
-    int damage = Integer.parseInt(hitParts[1]);
+private int currentRound = 0;
+private int redWins = 0;
+private int blueWins = 0;
+private long roundStartTime = 0;
+private String currentMapName = "map"; // 기본 맵
+private final String[] AVAILABLE_MAPS = {"map", "map2", "map3", "village"};
+
+private void startNextRound() {
+    currentRound++;
     
-    ClientHandler target = clients.get(targetName);
-    if (target == null || target.playerInfo == null) break;
+    // 맵 랜덤 선택 (서버가 결정)
+    Random rand = new Random();
+    currentMapName = AVAILABLE_MAPS[rand.nextInt(AVAILABLE_MAPS.length)];
     
-    // 스폰 보호 체크
-    if (System.currentTimeMillis() < target.spawnProtectedUntil) {
-        sendMessage("CHAT:[스폰 보호] " + targetName + "은(는) 무적 상태!");
+    roundStartTime = System.currentTimeMillis();
+    
+    // 모든 플레이어 리스폰 및 캐릭터 정보 동기화
+    broadcast("ROUND_START:" + currentRound + "," + currentMapName + ";" + 
+              getPlayerCountAndInfo());
+    
+    // 설치물 초기화 (터렛, 지뢰, 마커 제거)
+    placedObjects.clear();
+    strikeMarkers.clear();
+    broadcastPlacedObjectsClear();
+}
+```
+- **맵 랜덤 선택**: 서버가 매 라운드마다 맵 결정하여 모든 클라이언트 동기화
+- **3판 2선승**: 라운드 승리 조건 체크 및 최종 승자 결정
+- **설치물 초기화**: 라운드 시작 시 이전 라운드 오브젝트 제거
+
+### 5. 캐릭터 변경 제한 시스템 (강화) ✨
+```java
+case "CHARACTER_SELECT":
+    long elapsed = System.currentTimeMillis() - roundStartTime;
+    
+    // 1. 시간 제한 체크 (10초 엄격)
+    if (elapsed >= 10000) {
+        sendMessage("CHAR_CHANGE_DENIED:시간 초과 (" + (elapsed/1000) + "초 경과)");
+        System.out.println("[DENIED] " + playerName + " 캐릭터 변경 거부: 시간 초과");
         break;
     }
     
-    target.playerInfo.hp -= damage;
+    // 2. 라운드 상태 체크
+    if (roundState != RoundState.WAITING) {
+        sendMessage("CHAR_CHANGE_DENIED:라운드 진행 중");
+        break;
+    }
+    
+    // 3. 변경 횟수 체크 (1회 제한)
+    if (playerInfo.hasChangedCharacterInRound) {
+        sendMessage("CHAR_CHANGE_DENIED:이번 라운드에 이미 변경함");
+        break;
+    }
+    
+    // 변경 승인
+    playerInfo.characterId = newCharacterId;
+    playerInfo.hasChangedCharacterInRound = true;
+    System.out.println("[ALLOWED] " + playerName + " 캐릭터 변경: " + newCharacterId);
+    
+    // 즉시 동기화
+    broadcastStats();
+```
+- **3단계 검증**: 시간(10초), 라운드 상태, 변경 횟수 모두 체크
+- **상세 로깅**: 승인/거부 사유 명확히 기록
+- **즉시 동기화**: 변경 즉시 모든 클라이언트에 broadcastStats() 호출
+
+### 6. 충돌 감지 및 피해 처리
+```java
+case "HITME":
+    // 피해자 측 리포트 (클라이언트 히트 감지)
+    String attackerInfo = data; // "playerName" or "TURRET:ownerName"
+    
+    // 스폰 보호 체크
+    if (System.currentTimeMillis() < spawnProtectedUntil) {
+        sendMessage("CHAT:[스폰 보호] 무적 상태!");
+        break;
+    }
+    
+    playerInfo.hp -= GameConstants.DAMAGE;
     
     // 사망 처리
-    if (target.playerInfo.hp <= 0) {
-        target.playerInfo.hp = 0;
-        target.playerInfo.deaths++;
-        playerInfo.kills++;
+    if (playerInfo.hp <= 0) {
+        playerInfo.hp = 0;
+        playerInfo.deaths++;
+        
+        // 킬러 킬 카운트 증가
+        if (attackerInfo.startsWith("TURRET:")) {
+            String ownerName = attackerInfo.substring(7);
+            ClientHandler owner = clients.get(ownerName);
+            if (owner != null && owner.playerInfo != null) {
+                owner.playerInfo.kills++;
+            }
+        } else {
+            ClientHandler killer = clients.get(attackerInfo);
+            if (killer != null && killer.playerInfo != null) {
+                killer.playerInfo.kills++;
+            }
+        }
         
         broadcast("CHAT:" + playerName + "이(가) " + targetName + "을(를) 처치!", null);
         broadcast("PLAYER_DEATH:" + targetName + "," + playerName, null);

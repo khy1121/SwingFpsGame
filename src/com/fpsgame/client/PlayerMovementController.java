@@ -4,6 +4,34 @@ import com.fpsgame.common.GameConstants;
 
 /**
  * 플레이어 이동 및 카메라 제어 관리 클래스
+ * 
+ * <p>플레이어의 키 입력 기반 이동과 카메라 추적 로직을 담당합니다.
+ * 충돌 감지, 맵 경계 처리, 대각선 이동 시 슬라이딩 처리를 포함합니다.</p>
+ * 
+ * <h2>주요 기능:</h2>
+ * <ul>
+ *   <li>WASD/화살표 키 입력 처리</li>
+ *   <li>충돌 시 자동 슬라이딩 (한 축만 이동)</li>
+ *   <li>플레이어 중심 카메라 추적</li>
+ *   <li>카메라 맵 경계 제한</li>
+ * </ul>
+ * 
+ * <h2>사용 예시:</h2>
+ * <pre>
+ * PlayerMovementController controller = new PlayerMovementController(5, collisionManager);
+ * controller.updateMapSize(3200, 2400);
+ * 
+ * PlayerPosition newPos = new PlayerPosition(playerX, playerY);
+ * if (controller.updatePlayerPosition(playerX, playerY, keys, newPos)) {
+ *     playerX = newPos.x;
+ *     playerY = newPos.y;
+ * }
+ * </pre>
+ * 
+ * @author NetFps Team
+ * @version 1.0 (Phase 2 리팩토링)
+ * @see CollisionManager
+ * @see GamePanel
  */
 public class PlayerMovementController {
     
@@ -29,7 +57,15 @@ public class PlayerMovementController {
     
     /**
      * 플레이어 위치 업데이트 (키 입력 기반)
-     * @return 위치가 변경되었으면 true
+     * 
+     * <p>WASD 키 입력을 받아 플레이어 위치를 계산합니다.
+     * 충돌 시 대각선 이동의 경우 한 축만 이동하는 슬라이딩 처리를 합니다.</p>
+     * 
+     * @param currentX 현재 플레이어 X 좌표
+     * @param currentY 현재 플레이어 Y 좌표
+     * @param keys 키 입력 배열 (boolean[256], 'W'/'w', 'A'/'a' 등)
+     * @param outPosition 계산된 새 위치를 담을 객체 (출력 파라미터)
+     * @return 위치가 변경되었으면 true, 그대로면 false
      */
     public boolean updatePlayerPosition(int currentX, int currentY, boolean[] keys, PlayerPosition outPosition) {
         int oldX = currentX;

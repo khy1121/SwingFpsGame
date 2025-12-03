@@ -5,7 +5,33 @@ import java.util.List;
 
 /**
  * 충돌 감지 관리 클래스
- * 플레이어, 미사일, 오브젝트 간의 충돌을 처리
+ * 
+ * <p>게임 내 모든 충돌 감지 로직을 중앙에서 관리합니다.
+ * 플레이어, 미사일, 설치 오브젝트 간의 충돌을 체크하며,
+ * 타일 기반 walkable grid와 Rectangle 장애물을 모두 지원합니다.</p>
+ * 
+ * <h2>주요 기능:</h2>
+ * <ul>
+ *   <li>플레이어-장애물 충돌 감지 (원형 히트박스 기반)</li>
+ *   <li>미사일-벽 충돌 감지 (타일 + Rectangle 정밀 체크)</li>
+ *   <li>미사일-플레이어 충돌 감지 (거리 기반)</li>
+ *   <li>미사일-오브젝트 충돌 감지 (터렛, 지뢰 등)</li>
+ * </ul>
+ * 
+ * <h2>사용 예시:</h2>
+ * <pre>
+ * CollisionManager collisionManager = new CollisionManager(32);
+ * collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
+ * 
+ * if (collisionManager.checkCollisionWithObstacles(playerX, playerY)) {
+ *     // 플레이어가 장애물과 충돌함
+ * }
+ * </pre>
+ * 
+ * @author NetFps Team
+ * @version 1.0 (Phase 2 리팩토링)
+ * @see GamePanel
+ * @see PlayerMovementController
  */
 public class CollisionManager {
     
@@ -21,6 +47,14 @@ public class CollisionManager {
     
     /**
      * 맵 데이터 업데이트
+     * 
+     * <p>맵이 변경되거나 로드될 때 호출됩니다.
+     * 충돌 감지에 필요한 walkable grid와 장애물 목록을 설정합니다.</p>
+     * 
+     * @param walkableGrid 타일별 이동 가능 여부 (true = 이동 가능)
+     * @param gridRows 그리드 행 수
+     * @param gridCols 그리드 열 수
+     * @param obstacles 장애물 Rectangle 목록 (정밀 충돌용)
      */
     public void updateMapData(boolean[][] walkableGrid, int gridRows, int gridCols, List<Rectangle> obstacles) {
         this.walkableGrid = walkableGrid;
@@ -31,6 +65,13 @@ public class CollisionManager {
     
     /**
      * 플레이어가 장애물과 충돌하는지 체크
+     * 
+     * <p>플레이어를 반경 15픽셀의 원형 히트박스로 간주하고,
+     * Rectangle 장애물과의 교차 여부를 검사합니다.</p>
+     * 
+     * @param x 플레이어 중심 X 좌표
+     * @param y 플레이어 중심 Y 좌표
+     * @return 충돌 시 true, 안전할 경우 false
      */
     public boolean checkCollisionWithObstacles(int x, int y) {
         int playerRadius = 15;
@@ -47,6 +88,13 @@ public class CollisionManager {
     
     /**
      * 플레이어 반경을 샘플링하여 해당 위치가 모두 walkable인지 확인
+     * 
+     * <p>플레이어 중심과 8방향 샘플 포인트가 모두 walkable 타일 위에
+     * 있는지 확인합니다. 이를 통해 플레이어가 벽에 끼는 것을 방지합니다.</p>
+     * 
+     * @param x 플레이어 중심 X 좌표
+     * @param y 플레이어 중심 Y 좌표
+     * @return 모든 샘플 포인트가 walkable이면 true
      */
     public boolean isPositionWalkable(int x, int y) {
         int playerRadius = 15;

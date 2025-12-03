@@ -8,7 +8,34 @@ import java.util.Random;
 
 /**
  * 스폰 시스템 관리 클래스
- * 팀별 스폰 구역 및 타일 관리
+ * 
+ * <p>팀별 스폰 구역 및 타일 관리를 담당합니다.
+ * JSON 맵 데이터에서 스폰 타일 목록을 로드하여,
+ * 리스폰 시 해당 타일 중 랜덤 위치를 선택합니다.</p>
+ * 
+ * <h2>주요 기능:</h2>
+ * <ul>
+ *   <li>팀별 스폰 구역 설정 (RED, BLUE)</li>
+ *   <li>스폰 타일 목록 관리 (JSON 기반)</li>
+ *   <li>랜덤 스폰 위치 계산</li>
+ *   <li>초기 스폰 위치 제공</li>
+ * </ul>
+ * 
+ * <h2>사용 예시:</h2>
+ * <pre>
+ * SpawnManager spawnManager = new SpawnManager();
+ * spawnManager.setSpawnZones(redZone, blueZone);
+ * spawnManager.setSpawnTiles(redTiles, blueTiles);
+ * 
+ * SpawnPosition pos = spawnManager.getRandomSpawnPosition(GameConstants.TEAM_RED);
+ * playerX = pos.x;
+ * playerY = pos.y;
+ * </pre>
+ * 
+ * @author NetFps Team
+ * @version 1.0 (Phase 2 리팩토링)
+ * @see GamePanel
+ * @see MapManager
  */
 public class SpawnManager {
     

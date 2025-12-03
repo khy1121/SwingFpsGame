@@ -3,127 +3,279 @@
 ## 📋 파일 개요
 - **경로**: `src/com/fpsgame/client/GamePanel.java`
 - **역할**: 게임의 메인 화면 및 게임 로직 총괄 클래스
-- **라인 수**: 3,811줄 (대규모 클래스)
-- **주요 기능**: 렌더링, 입력 처리, 네트워크 통신, 게임 상태 관리, 맵 시스템, 스킬 이펙트
+- **라인 수**: 2,545줄 (Phase 2 리팩토링 후 1,266줄 감소 ⚡)
+- **주요 기능**: 게임 루프, 입력 처리, UI 통합
+- **리팩토링 상태**: Phase 1 & 2 완료 - GameRenderer, NetworkClient, 12개 매니저 클래스 분리
 
 ---
 
-## 🎯 주요 기능
+## 🎨 Phase 2 MVC 리팩토링 (2025-12-03)
 
-### 1. 게임 렌더링 시스템
+### 신규 매니저 클래스 통합 ✅
+GamePanel의 복잡도를 대폭 줄이기 위해 **4개의 주요 매니저**를 추가로 분리했습니다:
+
+#### 1. **CollisionManager** (충돌 감지 시스템)
 ```java
-class GameCanvas extends JPanel {
-    @Override
-    protected void paintComponent(Graphics g) {
-        super.paintComponent(g);
-        Graphics2D g2d = (Graphics2D) g;
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, 
-                             RenderingHints.VALUE_ANTIALIAS_ON);
-        
-        // 1. 맵 배경
-        if (mapImage != null) {
-            g2d.drawImage(mapImage, -cameraX, -cameraY, mapWidth, mapHeight, null);
+private final CollisionManager collisionManager;
+```
+- **책임**: 모든 충돌 감지 로직 전담
+- **주요 메서드**:
+  - `checkCollisionWithObstacles(x, y)` - 장애물 충돌 체크
+  - `isPositionWalkable(x, y)` - 이동 가능 타일 체크
+  - `isMissileBlocked(x, y)` - 미사일 벽 충돌
+  - `checkMissilePlayerCollision(mx, my, px, py)` - 미사일-플레이어 충돌
+  - `checkMissileObjectCollision(mx, my, ox, oy)` - 미사일-오브젝트 충돌
+- **장점**: 충돌 알고리즘을 한 곳에서 관리하여 수정 용이
+
+#### 2. **PlayerMovementController** (플레이어 이동 및 카메라)
+```java
+private final PlayerMovementController movementController;
+```
+- **책임**: 플레이어 이동 계산 및 카메라 추적
+- **주요 메서드**:
+  - `updatePlayerPosition(currentX, currentY, keys[], PlayerPosition)` - 키 입력 기반 이동 계산
+  - `updateCamera(playerX, playerY, CameraPosition)` - 카메라 중심 업데이트
+  - `updateMapSize(mapWidth, mapHeight)` - 맵 크기 변경 시 경계 재계산
+- **내부 클래스**: `PlayerPosition`, `CameraPosition` (불변 데이터 전달)
+- **개선 효과**: 이동 로직 분리로 GamePanel 간소화
+
+#### 3. **SpawnManager** (스폰 시스템)
+```java
+private final SpawnManager spawnManager;
+```
+- **책임**: 팀별 스폰 위치 관리 (JSON 기반)
+- **주요 메서드**:
+  - `setSpawnZones(redZone, blueZone)` - 스폰 구역 설정
+  - `setSpawnTiles(redTiles, blueTiles)` - 타일 단위 스폰 위치 목록
+  - `getRandomSpawnPosition(team)` - 랜덤 스폰 위치 계산
+  - `getInitialSpawnPosition(team, mapW, mapH)` - 첫 스폰 위치
+  - `hasValidSpawnZones()` - 스폰 구역 유효성 검증
+- **개선 효과**: 스폰 로직을 한 곳에 모아 맵 시스템과 분리
+
+#### 4. **GameObjectManager** (게임 오브젝트 관리)
+```java
+final GameObjectManager objectManager;
+```
+- **책임**: 미사일, 설치 오브젝트, 스트라이크 마커 관리
+- **내부 클래스** (GamePanel에서 이동):
+  - `Missile` - 투사체 (플레이어/터렛 발사)
+  - `PlacedObjectClient` - 설치 오브젝트 (터렛, 지뢰 등)
+  - `StrikeMarker` - 공습 마커
+- **주요 메서드**:
+  - `addMissile(Missile)`, `updateMissiles()`, `clearMissiles()`
+  - `putPlacedObject(id, PlacedObjectClient)`, `getPlacedObject(id)`
+  - `addStrikeMarker(id, StrikeMarker)`, `updateStrikeMarkers()`
+- **컬렉션 참조**: GamePanel은 `objectManager`를 통해 `missiles`, `placedObjects`, `strikeMarkers` 접근
+- **개선 효과**: GamePanel 내부 클래스 제거, 오브젝트 수명 관리 일원화
+
+### 아키텍처 다이어그램 (Phase 2 반영)
+```
+GamePanel (게임 루프 및 UI 통합)
+    ├─ GameState (상태 중앙 관리)
+    ├─ NetworkClient (통신)
+    ├─ GameRenderer (렌더링)
+    ├─ GameMessageHandler (메시지 처리)
+    ├─ MapManager (맵 로딩)
+    ├─ SkillManager (스킬 시스템)
+    ├─ UIManager (UI 컴포넌트)
+    ├─ GameLogicController (게임 로직)
+    ├─ CollisionManager (충돌 감지) ✨
+    ├─ PlayerMovementController (이동/카메라) ✨
+    ├─ SpawnManager (스폰 시스템) ✨
+    └─ GameObjectManager (오브젝트 관리) ✨
+```
+
+### 코드 개선 효과 📊
+- **라인 수 감소**: 3,811줄 → 2,545줄 (**-1,266줄, -33%**)
+- **책임 분리**: 단일 책임 원칙(SRP) 강화
+- **테스트 용이성**: 각 매니저를 독립적으로 테스트 가능
+- **유지보수성**: 버그 수정 시 관련 매니저만 수정하면 됨
+- **확장성**: 신규 기능 추가 시 해당 매니저에 메서드만 추가
+
+---
+
+## 🎯 주요 기능 (Phase 2 이후)
+
+### 1. 게임 루프 및 업데이트
+```java
+private void updateGame() {
+    if (roundState == RoundState.WAITING) {
+        long elapsed = System.currentTimeMillis() - roundStartTime;
+        if (elapsed >= ROUND_READY_TIME) {
+            roundState = RoundState.PLAYING;
+            centerMessage = "Round Start!";
+            centerMessageEndTime = System.currentTimeMillis() + 2000;
         }
-        
-        // 2. 장애물, 에어스트라이크 마커
-        drawObstacles(g2d);
-        drawStrikeMarkersMain(g2d);
-        
-        // 3. 플레이어들, 미사일, 스킬 이펙트
-        // 4. UI (HP바, 미니맵, 스킬 쿨다운)
+    }
+
+    updatePlayerPosition();       // MovementController 사용
+    updateMissiles();             // ObjectManager 사용
+    checkCollisions();            // CollisionManager 사용
+    updateAbilities();            // 스킬 쿨타임 업데이트
+    updateEffects();              // 이펙트 타이머 업데이트
+    skillEffects.update(0.016f);  // 구조화된 스킬 이펙트
+    updateRavenRuntime();         // Raven 버프/대쉬 처리
+    updatePiperRuntime();         // Piper 마킹/열감지 처리
+    updateTeamPiperRuntime();     // 원격 Piper 팀 버프
+    updateMyAnimation();          // 스프라이트 애니메이션
+
+    // 다른 플레이어 위치 보간
+    for (PlayerData pd : players.values()) {
+        pd.smoothUpdate();
     }
 }
 ```
-- **레이어 렌더링**: 배경 → 오브젝트 → UI 순서
-- **안티앨리어싱**: 부드러운 그래픽
+- **60 FPS 게임 루프**: javax.swing.Timer 사용 (16ms 간격)
+- **매니저 활용**: 각 시스템을 전담 매니저에 위임
+- **부드러운 보간**: 네트워크 지연 시에도 자연스러운 움직임
 
-### 2. 카메라 시스템
+### 2. 렌더링 파이프라인 (Phase 1 리팩토링)
 ```java
-private int cameraX = 0; // 카메라 위치 (플레이어 중심)
-private int cameraY = 0;
-private int mapWidth = 3200; // 맵 전체 크기 (화면의 4배)
-private int mapHeight = 2400;
+@Override
+protected void paintComponent(Graphics g) {
+    super.paintComponent(g);
+    // RenderContext를 생성하여 GameRenderer에 전달
+    GameRenderer.RenderContext ctx = GamePanel.this.createRenderContext();
+    gameRenderer.render(g, ctx);
+}
 
-// 카메라를 플레이어 중심으로 이동
-cameraX = playerX - GameConstants.GAME_WIDTH / 2;
-cameraY = playerY - GameConstants.GAME_HEIGHT / 2;
+private GameRenderer.RenderContext createRenderContext() {
+    GameRenderer.RenderContext ctx = new GameRenderer.RenderContext();
+    
+    // 맵 정보
+    ctx.mapImage = this.mapImage;
+    ctx.mapWidth = this.mapWidth;
+    ctx.cameraX = this.cameraX;
+    ctx.cameraY = this.cameraY;
+    ctx.obstacles = this.obstacles;
+    
+    // 플레이어 정보
+    ctx.playerX = this.playerX;
+    ctx.playerY = this.playerY;
+    ctx.myHP = gameState.getMyHP();
+    ctx.myMaxHP = gameState.getMyMaxHP();
+    
+    // 게임 오브젝트
+    ctx.players = this.players;
+    ctx.missiles = this.missiles;
+    ctx.placedObjects = this.placedObjects;
+    ctx.strikeMarkers = this.strikeMarkers;
+    
+    return ctx;
+}
+```
+- **레이어 렌더링**: 배경 → 오브젝트 → UI 순서
+- **데이터 전달 패턴**: RenderContext로 불변 데이터 전달
+- **렌더링 분리**: GameRenderer가 모든 그래픽 처리 전담
 
-// 맵 경계 제한
-cameraX = Math.max(0, Math.min(cameraX, mapWidth - GameConstants.GAME_WIDTH));
-cameraY = Math.max(0, Math.min(cameraY, mapHeight - GameConstants.GAME_HEIGHT));
+### 3. 카메라 시스템 (PlayerMovementController)
+```java
+private void updateCamera() {
+    PlayerMovementController.CameraPosition camera = 
+        new PlayerMovementController.CameraPosition(cameraX, cameraY);
+    movementController.updateCamera(playerX, playerY, camera);
+    cameraX = camera.x;
+    cameraY = camera.y;
+}
 ```
 - **부드러운 추적**: 플레이어를 화면 중앙에 유지
 - **경계 처리**: 맵 끝에서 카메라 멈춤
+- **매니저 위임**: 카메라 로직은 PlayerMovementController에서 관리
 
-### 3. 타일 기반 맵 시스템
+### 4. 타일 기반 맵 시스템 (MapManager)
 ```java
 private static final int TILE_SIZE = 32;
 private boolean[][] walkableGrid; // true = 이동 가능
 private int gridCols, gridRows;
 
-// 맵 편집 모드 (F4)
-private boolean editMode = false;
-private int editPaintMode = 0; // 0=walkable, 1=unwalkable, 2=RED 스폰, 3=BLUE 스폰
-```
-- **타일 기반 충돌**: 32x32 픽셀 단위
-- **실시간 편집**: F4로 맵 편집 모드 진입
-- **스폰 존 설정**: 팀별 리스폰 영역
-
-### 4. 네트워크 동기화
-```java
-private final Socket socket;
-private final DataOutputStream out;
-private final DataInputStream in;
-
-// 플레이어 위치 전송
-private void sendPosition() {
-    out.writeByte(Protocol.PLAYER_MOVE);
-    out.writeInt(playerX);
-    out.writeInt(playerY);
-    out.writeInt(myDirection);
-    out.flush();
+// 맵 로드 (JSON 기반)
+void loadMap(String mapName) {
+    // 1. 맵 이미지 로드
+    mapImage = javax.imageio.ImageIO.read(mapFile);
+    
+    // 2. JSON 로딩 (roads/obstacles + spawns)
+    boolean loadedFromJson = loadMapFromJsonIfAvailable(mapName);
+    
+    // 3. 스폰 구역 walkable 보장
+    ensureSpawnZonesWalkable();
+    
+    // 4. 매니저 업데이트
+    collisionManager.updateMapData(walkableGrid, gridRows, gridCols, obstacles);
+    movementController.updateMapSize(mapWidth, mapHeight);
+    objectManager.updateMapSize(mapWidth, mapHeight);
+    spawnManager.setSpawnZones(redSpawnZone, blueSpawnZone);
 }
+```
+- **JSON 기반**: roads/obstacles, 스폰 구역 정의
+- **우선순위**: `<name>_edited.json` → `<name>.json` → 이미지 분석
+- **실시간 편집**: F4로 맵 편집 모드 진입
+
+### 5. 네트워크 통신 (NetworkClient)
+```java
+private final NetworkClient networkClient;
+
+// 위치 전송
+networkClient.sendPosition(playerX, playerY, myDirection);
 
 // 스킬 사용 전송
-private void sendSkillUse(int slotIndex, String type, int targetX, int targetY) {
-    out.writeByte(Protocol.SKILL_USE);
-    out.writeUTF(selectedCharacter);
-    out.writeInt(slotIndex);
-    out.writeUTF(type);
-    out.writeInt(targetX);
-    out.writeInt(targetY);
-    out.flush();
+String msg = abilityId + "," + skillType + "," + duration;
+if (targetX >= 0 && targetY >= 0) {
+    msg += "," + targetX + "," + targetY;
 }
+networkClient.sendSkillUse(msg);
+
+// 피격 보고
+networkClient.sendHitReport("HITME:" + ownerInfo);
 ```
 - **TCP 소켓**: 신뢰성 있는 통신
-- **프로토콜 기반**: `Protocol` 클래스의 상수 사용
-- **플러시 패턴**: 즉시 전송 보장
+- **NetworkClient 위임**: 모든 네트워크 로직 캡슐화
+- **메시지 처리**: GameMessageHandler가 수신 메시지 파싱
 
-### 5. 스킬 시스템 통합
+### 6. 스킬 시스템 통합
 ```java
 private Ability[] abilities; // [기본공격, 전술스킬, 궁극기]
 private final SkillEffectManager skillEffects = new SkillEffectManager();
 
-// 캐릭터별 런타임 상태
+// 캐릭터별 런타임 상태 (로컬 버프)
 private float ravenDashRemaining = 0f;
 private float ravenOverchargeRemaining = 0f;
 private float piperMarkRemaining = 0f;
 private float piperThermalRemaining = 0f;
 private float teamMarkRemaining = 0f; // 팀 공유 버프
 private float teamThermalRemaining = 0f;
+
+// 스킬 쿨타임 업데이트
+private void updateAbilities() {
+    if (abilities != null) {
+        float deltaTime = 0.016f; // 16ms = 60 FPS
+        for (Ability ability : abilities) {
+            ability.update(deltaTime);
+        }
+    }
+}
 ```
 - **10개 캐릭터**: 각각 고유 스킬 3개 (기본/전술/궁극기)
 - **이펙트 매니저**: 시각적 피드백 관리
 - **팀 버프**: Piper의 스킬은 팀원에게도 적용
 
-### 6. 라운드 시스템
+### 7. 라운드 시스템
 ```java
-private enum RoundState { WAITING, PLAYING, ENDED }
+public enum RoundState { WAITING, PLAYING, ENDED }
 private RoundState roundState = RoundState.WAITING;
-private int roundCount = 1;
+private int roundCount = 0;
 private int redWins = 0, blueWins = 0;
-private static final int MAX_ROUNDS = 3; // 3판 2선승
 private static final int ROUND_READY_TIME = 10000; // 10초 대기
+
+private void startRound() {
+    roundState = RoundState.WAITING;
+    roundCount++;
+    roundStartTime = System.currentTimeMillis();
+    centerMessage = "Round " + roundCount + " Ready";
+    centerMessageEndTime = roundStartTime + ROUND_READY_TIME;
+    
+    hasChangedCharacterInRound = false;
+    respawn();
+}
 ```
 - **3판 2선승**: 경쟁 게임 모드
 - **준비 시간**: 라운드 시작 전 10초
@@ -133,38 +285,31 @@ private static final int ROUND_READY_TIME = 10000; // 10초 대기
 
 ## ✅ 강점 (Strengths)
 
-### 1. **포괄적인 게임 기능** ⭐⭐⭐⭐⭐
+### 1. **체계적인 MVC 아키텍처** ⭐⭐⭐⭐⭐
 ```java
-// 한 클래스에서 게임의 모든 핵심 기능 제공
-- 렌더링 (paintComponent)
-- 입력 처리 (KeyListener, MouseListener)
-- 네트워크 (Socket 통신)
-- 게임 로직 (충돌, 스킬, HP)
-- UI (채팅, 미니맵, HUD)
-- 맵 편집 (F4 에디터 모드)
+// Phase 1 & 2 리팩토링으로 명확한 책임 분리
+GamePanel (Controller/View 통합)
+    ├─ GameState (Model - 상태 관리)
+    ├─ GameRenderer (View - 렌더링)
+    ├─ NetworkClient (Network - 통신)
+    ├─ GameMessageHandler (Network - 메시지 처리)
+    ├─ 8개 매니저 클래스 (Model/Controller 역할 분담)
 ```
-- **장점**: 프로토타입 빠른 개발, 통합 테스트 용이
-- **사용 사례**: 교육용, 게임잼, 초기 프로토타입
+- **장점**: 단일 책임 원칙(SRP) 준수
+- **유지보수성**: 버그 수정 시 관련 매니저만 수정
+- **테스트 용이성**: 각 매니저를 독립적으로 테스트 가능
 
-### 2. **실시간 맵 편집 기능** ⭐⭐⭐⭐⭐
+### 2. **충돌 감지 시스템 (CollisionManager)** ⭐⭐⭐⭐⭐
 ```java
-// F4: 편집 모드 토글
-// F5: 현재 맵 저장 (map_edited.json)
-// F6: 다음 맵으로 전환
-// 1키: walkable 페인트
-// 2키: unwalkable (장애물) 페인트
-// 3키: RED 스폰 존 페인트
-// 4키: BLUE 스폰 존 페인트
-
-private void drawEditorOverlay(Graphics2D g2d) {
-    // 타일 그리드 표시
-    // 마우스 오버 타일 하이라이트
-    // 스폰 존 색상 표시 (빨강/파랑)
-}
+// 모든 충돌 로직을 한 곳에서 관리
+collisionManager.checkCollisionWithObstacles(x, y)
+collisionManager.isPositionWalkable(x, y)
+collisionManager.isMissileBlocked(x, y)
+collisionManager.checkMissilePlayerCollision(mx, my, px, py)
+collisionManager.checkMissileObjectCollision(mx, my, ox, oy)
 ```
-- **생산성**: 게임 실행 중 맵 수정 가능
-- **직관성**: 마우스 드래그로 타일 페인팅
-- **즉시 피드백**: 변경 사항 실시간 반영
+- **일관성**: 충돌 알고리즘이 한 곳에서 관리
+- **수정 용이**: 충돌 로직 변경 시 CollisionManager만 수정
 
 ### 3. **플레이어 보간 (Smooth Movement)** ⭐⭐⭐⭐
 ```java
@@ -178,17 +323,32 @@ class PlayerData {
         y += (int) ((targetY - y) * interpolation);
     }
 }
-
-// 네트워크 수신 시
-PlayerData p = players.get(playerName);
-p.targetX = x; // 목표 위치만 설정
-p.targetY = y;
-// smoothUpdate()가 부드럽게 이동 처리
 ```
 - **효과**: 네트워크 지연 시에도 부드러운 움직임
 - **성능**: CPU 부담 최소화 (단순 선형 보간)
 
-### 4. **시야 시스템 (Fog of War)** ⭐⭐⭐⭐
+### 4. **실시간 맵 편집 기능** ⭐⭐⭐⭐⭐
+```java
+// F4: 편집 모드 토글
+// F5: 현재 맵 저장 (map_edited.json)
+// F6: 다음 맵으로 전환
+// 1키: walkable 페인트
+// 2키: unwalkable (장애물) 페인트
+// 3키: RED 스폰 존 페인트
+// 4키: BLUE 스폰 존 페인트
+
+void saveEditedMap() {
+    String fileName = currentMapName + "_edited.json";
+    File outFile = new File("assets/maps", fileName);
+    bw.write(generateEditedMapJson());
+    appendChatMessage("[에디터] 저장 완료: " + outFile.getPath());
+}
+```
+- **생산성**: 게임 실행 중 맵 수정 가능
+- **직관성**: 마우스 드래그로 타일 페인팅
+- **즉시 피드백**: 변경 사항 실시간 반영
+
+### 5. **시야 시스템 (Fog of War)** ⭐⭐⭐⭐
 ```java
 private static final int VISION_RANGE = (int) (Math.sqrt(
     GameConstants.GAME_WIDTH * GameConstants.GAME_WIDTH +
@@ -199,25 +359,21 @@ private static final int VISION_RANGE = (int) (Math.sqrt(
 private static final float PIPER_MARK_RANGE_FACTOR = 1.7f;
 
 // 적 플레이어 그리기 전 거리 체크
-int distance = (int) Math.sqrt((screenX - myScreenX) * (screenX - myScreenX) + 
-                                (screenY - myScreenY) * (screenY - myScreenY));
 if (distance <= currentVisionRange) {
     // 시야 내: 실제 모델 그리기
 } else {
-    // 시야 밖: 그리지 않음 (전략적 요소)
+    // 시야 밖: 그리지 않음
 }
 ```
 - **전략성**: 적 위치 파악의 중요성
 - **캐릭터 차별화**: Piper의 정찰 역할
 
-### 5. **캐릭터 다양성 (10개 캐릭터)** ⭐⭐⭐⭐⭐
+### 6. **캐릭터 다양성 (10개 캐릭터)** ⭐⭐⭐⭐⭐
 ```java
 // 각 캐릭터별 고유 런타임 상태 관리
-private float ravenDashRemaining = 0f;       // Raven: 돌진
-private float ravenOverchargeRemaining = 0f; // Raven: 과충전
-private float piperMarkRemaining = 0f;       // Piper: 표적 지정
-private float piperThermalRemaining = 0f;    // Piper: 열감지
-// ... General, Ghost, Bulldog, Sage, Skull, Steam, Tech, Wildcat
+// 완성된 캐릭터: Raven, Piper, Technician, General
+// 구현되었으나 비활성화: Ghost, Skull, Sage
+// 미구현: Bulldog, Wildcat, Steam
 ```
 - **개성**: 각 캐릭터가 독특한 플레이 스타일
 - **밸런스**: 역할 분담 (탱커, 딜러, 서포터, 정찰)
@@ -226,183 +382,219 @@ private float piperThermalRemaining = 0f;    // Piper: 열감지
 
 ## ⚠️ 개선 영역 (Areas for Improvement)
 
-### 1. **God Object 안티패턴** 🔴 HIGH
+### 1. **캐릭터별 하드코딩된 상태** 🟡 MEDIUM
 **현재 코드:**
 ```java
-public class GamePanel extends JFrame implements KeyListener {
-    // 3,811줄의 단일 클래스
-    // 렌더링, 네트워크, 게임 로직, UI, 입력 처리 모두 포함
-}
-```
-
-**문제점:**
-- **단일 책임 원칙 위반**: 한 클래스가 너무 많은 역할
-- **유지보수 어려움**: 버그 수정 시 영향 범위 파악 힘듦
-- **테스트 불가능**: 단위 테스트 작성 불가능
-- **재사용 불가능**: 다른 프로젝트에서 일부만 사용 불가
-
-**개선안 - MVC 패턴 적용:**
-```java
-// Model - 게임 상태
-public class GameState {
-    private Map<String, Player> players;
-    private List<Missile> missiles;
-    private List<PlacedObject> placedObjects;
-    private RoundManager roundManager;
-    
-    public void update(float deltaTime) {
-        // 게임 로직만 처리
-    }
-}
-
-// View - 렌더링
-public class GameRenderer {
-    public void render(Graphics2D g, GameState state, Camera camera) {
-        renderMap(g, camera);
-        renderPlayers(g, state.getPlayers(), camera);
-        renderMissiles(g, state.getMissiles(), camera);
-        renderUI(g, state);
-    }
-}
-
-// Controller - 입력 처리
-public class InputController {
-    private KeyBindingConfig keyConfig;
-    
-    public void handleInput(GameState state, NetworkClient network) {
-        if (keyConfig.isKeyPressed("MOVE_UP")) {
-            state.movePlayer(0, -1);
-            network.sendPosition(state.getMyPlayer());
-        }
-    }
-}
-
-// Network - 통신
-public class NetworkClient {
-    private Socket socket;
-    private DataOutputStream out;
-    private DataInputStream in;
-    
-    public void sendPosition(Player player) { /* ... */ }
-    public void sendSkillUse(Skill skill) { /* ... */ }
-}
-
-// Main Panel - 조합
-public class GamePanel extends JPanel {
-    private GameState state = new GameState();
-    private GameRenderer renderer = new GameRenderer();
-    private InputController input = new InputController();
-    private NetworkClient network = new NetworkClient();
-    
-    @Override
-    protected void paintComponent(Graphics g) {
-        renderer.render((Graphics2D) g, state, camera);
-    }
-    
-    private void gameLoop() {
-        input.handleInput(state, network);
-        state.update(deltaTime);
-        repaint();
-    }
-}
-```
-
-**장점:**
-- **명확한 책임**: 각 클래스가 하나의 역할만 수행
-- **테스트 가능**: GameState 단독으로 단위 테스트 가능
-- **재사용성**: GameRenderer를 리플레이 시스템에서 재사용 가능
-- **병렬 개발**: 팀원들이 다른 컴포넌트 동시 작업 가능
-
----
-
-### 2. **캐릭터별 하드코딩된 상태** 🔴 HIGH
-**현재 코드:**
-```java
-// 10개 캐릭터 × 3개 스킬 = 30개 상태 변수
+// GamePanel에 캐릭터별 상태 변수가 직접 선언됨
 private float ravenDashRemaining = 0f;
 private float ravenOverchargeRemaining = 0f;
 private float piperMarkRemaining = 0f;
 private float piperThermalRemaining = 0f;
-private float generalAuraRemaining = 0f;
-private float generalStrikeRemaining = 0f;
-// ... 24개 더
+private float missileSpeedMultiplier = 1f; // Raven 과충전 시
+private float moveSpeedMultiplier = 1.0f;  // General 오라 버프
+
+// 업데이트 메서드도 각 캐릭터별로 분리
+private void updateRavenRuntime() { /* ... */ }
+private void updatePiperRuntime() { /* ... */ }
 ```
 
 **문제점:**
-- **확장 불가능**: 새 캐릭터 추가 시 클래스 수정 필요
-- **코드 중복**: 비슷한 로직이 30개 변수마다 반복
-- **버그 위험**: 한 캐릭터 수정 시 다른 캐릭터에 영향
+- **확장 불가능**: 새 캐릭터 추가 시 GamePanel 수정 필요
+- **코드 중복**: 비슷한 로직이 각 캐릭터마다 반복
+- **OCP 위반**: 기존 코드 수정 없이 확장 불가
 
-**개선안 - 다형성 활용:**
+**개선안 - 캐릭터 컨트롤러 패턴:**
 ```java
-// 캐릭터 인터페이스
-public interface Character {
-    void updateSkills(float deltaTime);
-    void useBasicAttack(int targetX, int targetY);
-    void useTacticalSkill(int targetX, int targetY);
+// 캐릭터 컨트롤러 인터페이스
+public interface CharacterController {
+    void updateRuntime(float deltaTime);
+    void applyBuffs(Player player);
+    void useTactical(int targetX, int targetY);
     void useUltimate(int targetX, int targetY);
-    void renderEffects(Graphics2D g, int x, int y);
 }
 
-// 구체적 구현
-public class RavenCharacter implements Character {
+// Raven 전용 컨트롤러
+public class RavenController implements CharacterController {
     private float dashRemaining = 0f;
     private float overchargeRemaining = 0f;
     
     @Override
-    public void updateSkills(float deltaTime) {
-        if (dashRemaining > 0) {
+    public void updateRuntime(float deltaTime) {
+        if (dashRemaining > 0f) {
             dashRemaining -= deltaTime;
-            // 대시 효과 적용
+            // 대시 이동 로직
         }
-        if (overchargeRemaining > 0) {
+        if (overchargeRemaining > 0f) {
             overchargeRemaining -= deltaTime;
-            // 과충전 효과 적용
         }
     }
     
     @Override
-    public void useTacticalSkill(int targetX, int targetY) {
+    public void applyBuffs(Player player) {
+        if (overchargeRemaining > 0f) {
+            player.setMissileSpeedMultiplier(1.8f);
+            player.setAttackCooldownMultiplier(0.35f);
+        }
+    }
+    
+    @Override
+    public void useTactical(int targetX, int targetY) {
         dashRemaining = 0.5f; // 0.5초 대시
-        // 대시 로직
     }
     
     @Override
     public void useUltimate(int targetX, int targetY) {
         overchargeRemaining = 8f; // 8초 과충전
-        // 과충전 로직
     }
-}
-
-public class PiperCharacter implements Character {
-    private float markRemaining = 0f;
-    private float thermalRemaining = 0f;
-    // Piper만의 로직
 }
 
 // GamePanel에서 사용
 public class GamePanel {
-    private Character myCharacter;
-    private Map<String, Character> characterInstances = new HashMap<>();
+    private CharacterController characterController;
     
     private void selectCharacter(String characterId) {
         switch (characterId) {
-            case "raven": myCharacter = new RavenCharacter(); break;
-            case "piper": myCharacter = new PiperCharacter(); break;
-            // ...
+            case "raven": 
+                characterController = new RavenController(); 
+                break;
+            case "piper": 
+                characterController = new PiperController(); 
+                break;
+            // ... 다른 캐릭터들
         }
     }
     
-    private void gameLoop() {
-        myCharacter.updateSkills(deltaTime);
+    private void updateGame() {
+        // 하나의 메서드로 모든 캐릭터 처리
+        characterController.updateRuntime(0.016f);
+        characterController.applyBuffs(myPlayer);
     }
 }
 ```
 
 **장점:**
-- **확장성**: 새 캐릭터는 새 클래스만 추가
+- **확장성**: 새 캐릭터는 새 컨트롤러 클래스만 추가
 - **캡슐화**: 캐릭터 로직이 자신의 클래스 내부에만 존재
-- **타입 안전**: 컴파일 타임에 오류 감지
+- **OCP 준수**: GamePanel 수정 없이 캐릭터 추가 가능
+
+---
+
+### 2. **스킬 사용 로직 중복** 🟡 MEDIUM
+**현재 코드:**
+```java
+private void useBasicAttack(int targetX, int targetY) {
+    if (abilities != null && abilities.length > 0) {
+        Ability basicAttack = abilities[0];
+        if (basicAttack.canUse()) {
+            basicAttack.activate();
+            shootMissile(targetX, targetY);
+            sendSkillUse(0, "BASIC");
+            addLocalEffect(basicAttack);
+        }
+    }
+}
+
+private void useTacticalSkill() {
+    if (abilities != null && abilities.length > 1) {
+        Ability tactical = abilities[1];
+        if (tactical.canUse()) {
+            tactical.activate();
+            appendChatMessage("[스킬] " + tactical.getName() + " 사용!");
+            
+            // Technician 지뢰: 플레이어 위치에 설치
+            if ("tech_mine".equalsIgnoreCase(tactical.id)) {
+                sendSkillUse(1, "TACTICAL", playerX, playerY);
+            } else {
+                sendSkillUse(1, "TACTICAL");
+            }
+            
+            applySkillEffect(tactical);
+            addLocalEffect(tactical);
+            // Raven 대시 특수 처리
+            if ("raven".equalsIgnoreCase(gameState.getSelectedCharacter())) {
+                ravenDashRemaining = Math.max(ravenDashRemaining, tactical.getActiveDuration());
+            }
+        }
+    }
+}
+
+private void useUltimateSkill() {
+    // 비슷한 중복 로직...
+}
+```
+
+**문제점:**
+- **중복 코드**: 3개 메서드가 거의 동일한 구조
+- **캐릭터별 분기**: if-else로 특수 처리 (유지보수 어려움)
+- **확장 불가**: 새 스킬 타입 추가 시 모든 메서드 수정 필요
+
+**개선안 - 템플릿 메서드 패턴:**
+```java
+// SkillManager로 통합 (이미 존재하지만 더 확장 가능)
+public class SkillManager {
+    private Ability[] abilities;
+    
+    /**
+     * 스킬 사용 템플릿 메서드
+     */
+    public boolean useSkill(int skillIndex, int targetX, int targetY, 
+                             Consumer<String> logger, 
+                             BiConsumer<Integer, String> networkSender) {
+        if (abilities == null || skillIndex >= abilities.length) {
+            return false;
+        }
+        
+        Ability skill = abilities[skillIndex];
+        if (!skill.canUse()) {
+            logger.accept("[스킬] " + skill.getName() + " 쿨타임 중입니다.");
+            return false;
+        }
+        
+        // 1. 스킬 활성화
+        skill.activate();
+        logger.accept("[스킬] " + skill.getName() + " 사용!");
+        
+        // 2. 네트워크 전송
+        if (targetX >= 0 && targetY >= 0) {
+            networkSender.accept(skillIndex, skill.getType().name() + ":" + targetX + "," + targetY);
+        } else {
+            networkSender.accept(skillIndex, skill.getType().name());
+        }
+        
+        // 3. 로컬 이펙트 추가
+        addLocalEffect(skill);
+        
+        // 4. 캐릭터별 특수 효과는 CharacterController에 위임
+        return true;
+    }
+}
+
+// GamePanel에서 사용
+private void useBasicAttack(int targetX, int targetY) {
+    if (skillManager.useSkill(0, targetX, targetY, 
+                               this::appendChatMessage, 
+                               networkClient::sendSkillUse)) {
+        shootMissile(targetX, targetY);
+    }
+}
+
+private void useTacticalSkill() {
+    skillManager.useSkill(1, playerX, playerY, 
+                          this::appendChatMessage, 
+                          networkClient::sendSkillUse);
+}
+
+private void useUltimateSkill() {
+    skillManager.useSkill(2, -1, -1, 
+                          this::appendChatMessage, 
+                          networkClient::sendSkillUse);
+}
+```
+
+**장점:**
+- **코드 재사용**: 중복 로직 제거
+- **확장 용이**: 새 스킬 타입 추가 시 SkillManager만 수정
+- **테스트 가능**: SkillManager 단독 테스트 가능
 
 ---
 
