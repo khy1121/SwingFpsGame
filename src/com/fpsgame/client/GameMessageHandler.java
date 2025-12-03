@@ -414,7 +414,17 @@ public class GameMessageHandler {
     }
     
     private void handlePlayerInitialization(String playerInfoData) {
+        if (playerInfoData == null || playerInfoData.trim().isEmpty()) {
+            System.err.println("[ERROR] handlePlayerInitialization: playerInfoData is null or empty");
+            return;
+        }
+        
         String[] playerInfo = playerInfoData.split(";");
+        if (playerInfo.length < 1) {
+            System.err.println("[ERROR] handlePlayerInitialization: playerInfo.length < 1");
+            return;
+        }
+        
         int playerCount = Integer.parseInt(playerInfo[0]);
         
         System.out.println("[ROUND_START] Parsing " + playerCount + " players from server");
@@ -424,24 +434,50 @@ public class GameMessageHandler {
             if (pData.length >= 4) {
                 String pName = pData[0];
                 String pCharId = pData[1];
-                int pHp = Integer.parseInt(pData[2]);
-                int pMaxHp = Integer.parseInt(pData[3]);
                 
-                System.out.println("[ROUND_START] Player: " + pName + ", Char: " + pCharId + 
-                    ", HP: " + pHp + "/" + pMaxHp);
+                if (pName == null || pName.trim().isEmpty()) {
+                    System.err.println("[ERROR] handlePlayerInitialization: pName is null or empty at index " + i);
+                    continue;
+                }
+                if (pCharId == null || pCharId.trim().isEmpty()) {
+                    System.err.println("[ERROR] handlePlayerInitialization: pCharId is null or empty for " + pName);
+                    continue;
+                }
                 
-                if (pName.equals(gamePanel.playerName)) {
-                    initializeMyCharacter(pCharId, pHp, pMaxHp);
-                } else {
-                    initializeRemotePlayer(pName, pCharId, pHp, pMaxHp);
+                try {
+                    int pHp = Integer.parseInt(pData[2]);
+                    int pMaxHp = Integer.parseInt(pData[3]);
+                    
+                    System.out.println("[ROUND_START] Player: " + pName + ", Char: " + pCharId + 
+                        ", HP: " + pHp + "/" + pMaxHp);
+                    
+                    if (pName.equals(gamePanel.playerName)) {
+                        initializeMyCharacter(pCharId, pHp, pMaxHp);
+                    } else {
+                        initializeRemotePlayer(pName, pCharId, pHp, pMaxHp);
+                    }
+                } catch (NumberFormatException ex) {
+                    System.err.println("[ERROR] handlePlayerInitialization: Invalid HP values for " + pName);
+                    ex.printStackTrace();
                 }
             }
         }
     }
     
     private void initializeMyCharacter(String charId, int hp, int maxHp) {
+        if (charId == null || charId.trim().isEmpty()) {
+            System.err.println("[ERROR] initializeMyCharacter: charId is null or empty");
+            return;
+        }
+        
+        CharacterData cd = CharacterData.getById(charId);
+        if (cd == null) {
+            System.err.println("[ERROR] initializeMyCharacter: CharacterData not found for " + charId);
+            return;
+        }
+        
         gamePanel.gameState.setSelectedCharacter(charId);
-        gamePanel.gameState.setCurrentCharacterData(CharacterData.getById(charId));
+        gamePanel.gameState.setCurrentCharacterData(cd);
         gamePanel.gameState.setMyHP(hp);
         gamePanel.gameState.setMyMaxHP(maxHp);
         
@@ -462,6 +498,15 @@ public class GameMessageHandler {
     }
     
     private void initializeRemotePlayer(String name, String charId, int hp, int maxHp) {
+        if (name == null || name.trim().isEmpty()) {
+            System.err.println("[ERROR] initializeRemotePlayer: name is null or empty");
+            return;
+        }
+        if (charId == null || charId.trim().isEmpty()) {
+            System.err.println("[ERROR] initializeRemotePlayer: charId is null or empty for " + name);
+            return;
+        }
+        
         GamePanel.PlayerData pd = gamePanel.players.get(name);
         if (pd != null) {
             pd.characterId = charId;
@@ -470,6 +515,8 @@ public class GameMessageHandler {
             gamePanel.loadPlayerSprites(pd, charId);
             System.out.println("[ROUND_START] Remote player updated: " + name + 
                 " -> " + charId + " HP: " + hp + "/" + maxHp);
+        } else {
+            System.err.println("[ERROR] initializeRemotePlayer: PlayerData not found for " + name);
         }
     }
     

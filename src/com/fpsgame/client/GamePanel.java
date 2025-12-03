@@ -487,7 +487,7 @@ public class GamePanel extends JFrame implements KeyListener {
         this.abilities = CharacterData.createAbilities(selectedChar);
         gameState.setAbilities(this.abilities);
 
-        // 맵 로드
+        // 기본 맵 로드 (ROUND_START에서 다른 맵으로 변경될 수 있음)
         loadMap(currentMapName);
 
         // 플레이어 초기 위치 (팀별 스폰 지역)

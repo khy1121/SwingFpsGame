@@ -227,7 +227,13 @@ public class GameServer {
 
                 while (true) {
                     String message = in.readUTF();
-                    processMessage(message);
+                    try {
+                        processMessage(message);
+                    } catch (Exception ex) {
+                        System.err.println("[ERROR] processMessage 실패 (" + playerName + "): " + message);
+                        ex.printStackTrace();
+                        // 계속 진행 (연결은 유지)
+                    }
                 }
             } catch (IOException e) {
                 System.out.println("클라이언트 연결 끊김: " + playerName);
