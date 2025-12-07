@@ -1,7 +1,6 @@
 package com.fpsgame.client;
 
 import java.util.*;
-import com.fpsgame.common.GameConstants;
 
 /**
  * 게임 오브젝트 관리 클래스 - Phase 2 리팩토링
@@ -87,14 +86,25 @@ public class GameObjectManager {
             m.x += m.dx;
             m.y += m.dy;
             
+            // 사거리 체크 (maxRange > 0이면 제한 있음)
+            if (m.maxRange > 0) {
+                float dx = m.x - m.startX;
+                float dy = m.y - m.startY;
+                double distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > m.maxRange) {
+                    it.remove();
+                    continue;
+                }
+            }
+            
             // 맵 밖이면 제거
             if (m.x < 0 || m.x > mapWidth || m.y < 0 || m.y > mapHeight) {
                 it.remove();
                 continue;
             }
             
-            // 벽 충돌
-            if (collisionManager.isMissileBlocked(m.x, m.y)) {
+            // 벽 충돌 (정수 좌표로 변환하여 체크)
+            if (collisionManager.isMissileBlocked((int)m.x, (int)m.y)) {
                 it.remove();
             }
         }
@@ -215,18 +225,31 @@ public class GameObjectManager {
      * </code></pre>
      */
     public static class Missile {
-        public int x, y;
-        public int dx, dy;
+        private static int nextId = 1; // 미사일 ID 카운터
+        
+        public int id;            // 미사일 고유 ID
+        public float x, y;        // 실수 좌표로 변경 (정밀한 이동)
+        public float dx, dy;      // 실수 이동량으로 변경 (정밀한 각도)
         public int team;
         public String owner;
+        public float startX, startY;  // 발사 위치
+        public float maxRange;        // 최대 사거리 (0이면 무제한)
         
-        public Missile(int x, int y, int dx, int dy, int team, String owner) {
+        public Missile(float x, float y, float dx, float dy, int team, String owner) {
+            this(x, y, dx, dy, team, owner, 0f);
+        }
+        
+        public Missile(float x, float y, float dx, float dy, int team, String owner, float maxRange) {
+            this.id = nextId++; // 고유 ID 할당
             this.x = x;
             this.y = y;
             this.dx = dx;
             this.dy = dy;
             this.team = team;
             this.owner = owner;
+            this.startX = x;
+            this.startY = y;
+            this.maxRange = maxRange;
         }
     }
     

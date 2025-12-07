@@ -1,10 +1,9 @@
 package com.fpsgame.client;
 
+import com.fpsgame.client.effects.*;
 import com.fpsgame.common.Ability;
 import com.fpsgame.common.CharacterData;
 import com.fpsgame.common.GameConstants;
-import com.fpsgame.client.effects.*;
-
 import java.util.*;
 
 /**
@@ -52,6 +51,7 @@ public class GameMessageHandler {
             case "TURRET_SHOOT" -> handleTurretShoot(data);
             case "ROUND_WIN" -> handleRoundWin(data);
             case "ROUND_END" -> handleRoundEnd(data);
+            case "MAP_SYNC" -> handleMapChange(data);
             case "ROUND_START" -> handleRoundStart(data);
             case "GAME_OVER" -> handleGameOver(data);
             case "GAME_END" -> handleGameEnd(data);
@@ -258,8 +258,9 @@ public class GameMessageHandler {
             gamePanel.gameState.getMyHP() + "/" + gamePanel.gameState.getMyMaxHP() + 
             " (Character: " + gamePanel.gameState.getSelectedCharacter() + ")");
         
+        // 라운드 중 자동 부활 비활성화 - 라운드 시작 시에만 부활
         if (gamePanel.gameState.getMyHP() <= 0) {
-            gamePanel.respawn();
+            gamePanel.appendChatMessage("[사망] 다음 라운드가 시작되면 부활합니다.");
         }
     }
     
@@ -285,16 +286,39 @@ public class GameMessageHandler {
         if (shootData.length < 5) return;
         
         String shooter = shootData[0];
-        int sx = Integer.parseInt(shootData[1]);
-        int sy = Integer.parseInt(shootData[2]);
-        int dx = Integer.parseInt(shootData[3]);
-        int dy = Integer.parseInt(shootData[4]);
+        float sx = Float.parseFloat(shootData[1]);
+        float sy = Float.parseFloat(shootData[2]);
+        float dx = Float.parseFloat(shootData[3]);
+        float dy = Float.parseFloat(shootData[4]);
         
         // 다른 플레이어의 발사 시각 효과 (총구 섬광)
         if (!shooter.equals(gamePanel.playerName)) {
-            double angle = Math.atan2(dy - sy, dx - sx);
+            double angle = Math.atan2(dy, dx);
             gamePanel.skillEffects.addForPlayer(shooter, new MuzzleFlashEffect(angle));
-            System.out.println("[SHOOT] " + shooter + " fired from (" + sx + "," + sy + ") to (" + dx + "," + dy + ")");
+            
+            // 다른 플레이어의 미사일 생성
+            GamePanel.PlayerData shooterData = gamePanel.players.get(shooter);
+            if (shooterData != null) {
+                int team = shooterData.team;
+                
+                // 발사한 플레이어의 캐릭터 데이터에서 사거리 가져오기
+                float maxRange = 0f;
+                String charId = shooterData.characterId;
+                if (charId != null && !charId.isEmpty()) {
+                    Ability[] abilities = CharacterData.createAbilities(charId);
+                    if (abilities != null && abilities.length > 0) {
+                        maxRange = abilities[0].range;
+                    }
+                }
+                
+                GameObjectManager.Missile missile = new GameObjectManager.Missile(
+                    sx, sy, dx, dy, team, shooter, maxRange
+                );
+                gamePanel.objectManager.addMissile(missile);
+                
+                System.out.println("[SHOOT] " + shooter + " fired from (" + sx + "," + sy + 
+                                 ") dir (" + dx + "," + dy + ") range: " + maxRange);
+            }
         }
     }
     
@@ -318,6 +342,16 @@ public class GameMessageHandler {
             
             // 구조화된 스킬 이펙트 등록
             addSkillEffect(user, abilityId, duration);
+            
+            // 팀원의 Piper 스킬을 받으면 팀 공유 활성화
+            GamePanel.PlayerData teammate = gamePanel.players.get(user);
+            if (teammate != null && teammate.team == gamePanel.gameState.getTeam()) {
+                if ("piper_mark".equals(abilityId)) {
+                    gamePanel.setTeamMarkRemaining(duration);
+                } else if ("piper_thermal".equals(abilityId)) {
+                    gamePanel.setTeamThermalRemaining(duration);
+                }
+            }
         }
     }
     
@@ -390,15 +424,21 @@ public class GameMessageHandler {
     }
     
     private void handleBuff(String data) {
+        // 형식: targetName,abilityId,moveSpeedMult,attackSpeedMult,durationRemaining
         String[] bd = data.split(",");
-        if (bd.length >= 3) {
-            String buffType = bd[0];
-            float moveMulti = Float.parseFloat(bd[1]);
-            float attackMulti = Float.parseFloat(bd[2]);
-            gamePanel.moveSpeedMultiplier = moveMulti;
-            gamePanel.getSkillManager().setAttackSpeedMultiplier(attackMulti);
-            if (moveMulti > 1.0f || attackMulti > 1.0f) {
-                gamePanel.appendChatMessage("[버프] " + buffType + " 활성화!");
+        if (bd.length >= 4) {
+            String targetName = bd[0];
+            String abilityId = bd[1];
+            float moveMulti = Float.parseFloat(bd[2]);
+            float attackMulti = Float.parseFloat(bd[3]);
+            
+            // 자신에게 적용된 버프만 처리
+            if (targetName.equals(gamePanel.playerName)) {
+                gamePanel.moveSpeedMultiplier = moveMulti;
+                gamePanel.getSkillManager().setAttackSpeedMultiplier(attackMulti);
+                if (moveMulti > 1.0f || attackMulti > 1.0f) {
+                    gamePanel.appendChatMessage("[버프] " + abilityId + " 활성화!");
+                }
             }
         }
     }
@@ -542,17 +582,35 @@ public class GameMessageHandler {
         String[] roundParts = mainParts[0].split(",");
         gamePanel.roundCount = Integer.parseInt(roundParts[0]);
         
-        // 맵 변경 처리
+        // 맵 변경 처리 (동기식으로 완료될 때까지 대기)
         if (roundParts.length > 1) {
-            handleMapChange(roundParts[1]);
+            String newMapId = roundParts[1].trim();
+            if (!newMapId.isEmpty() && !newMapId.equals(gamePanel.currentMapName)) {
+                System.out.println("[맵 변경] " + gamePanel.currentMapName + " → " + newMapId);
+                try {
+                    System.out.println("[맵] 로딩 시작: " + newMapId);
+                    gamePanel.currentMapName = newMapId;
+                    gamePanel.loadMap(newMapId);
+                    System.out.println("[맵] 로딩 완료: " + newMapId);
+                    gamePanel.appendChatMessage("[맵] " + newMapId + " 맵으로 변경되었습니다!");
+                } catch (Exception e) {
+                    System.err.println("[맵] 로딩 실패: " + e.getMessage());
+                    e.printStackTrace(System.err);
+                }
+            } else if (!newMapId.isEmpty()) {
+                System.out.println("[맵] 이미 로드됨: " + newMapId + " (스킵)");
+            }
         }
         
-        // 플레이어 정보 초기화
+        // 플레이어 정보 초기화 (맵 로딩 후)
         if (mainParts.length > 1) {
             handlePlayerInitialization(mainParts[1]);
         }
         
-        // 라운드 시작
+        // 라운드 시작 - 설치물 초기화
+        gamePanel.objectManager.clearPlacedObjects();
+        gamePanel.appendChatMessage("[시스템] 이전 라운드의 설치물이 제거되었습니다.");
+        
         gamePanel.roundState = GamePanel.RoundState.WAITING;
         gamePanel.roundStartTime = System.currentTimeMillis();
         gamePanel.centerMessage = "";
@@ -569,16 +627,23 @@ public class GameMessageHandler {
             return;
         }
         
+        newMapId = newMapId.trim();
+        
         // 다른 맵인 경우에만 로드 (중복 방지)
         if (!newMapId.equals(gamePanel.currentMapName)) {
             final String mapToLoad = newMapId;
             System.out.println("[맵 변경] " + gamePanel.currentMapName + " → " + mapToLoad);
             
+            // 맵 로딩 스레드
             new Thread(() -> {
                 try {
                     System.out.println("[맵] 로딩 시작: " + mapToLoad);
+                    
+                    // 맵 로딩 전에 currentMapName 업데이트하여 중복 로드 방지
                     gamePanel.currentMapName = mapToLoad;
+                    
                     gamePanel.loadMap(mapToLoad);
+                    
                     javax.swing.SwingUtilities.invokeLater(() -> {
                         gamePanel.appendChatMessage("[맵] " + mapToLoad + " 맵으로 변경되었습니다!");
                     });
@@ -587,9 +652,9 @@ public class GameMessageHandler {
                     System.err.println("[맵] 로딩 실패: " + e.getMessage());
                     e.printStackTrace(System.err);
                 }
-            }, "MapLoader-Thread").start();
+            }, "MapLoader-" + mapToLoad).start();
         } else {
-            System.out.println("[맵] 이미 로드됨: " + newMapId + " (중복 로드 방지)");
+            System.out.println("[맵] 이미 로드됨: " + newMapId + " (스킵)");
         }
     }
     
@@ -712,6 +777,9 @@ public class GameMessageHandler {
         gamePanel.appendChatMessage("[게임 종료] " + winTeamName + " 팀이 최종 승리했습니다!");
         gamePanel.appendChatMessage("========================================");
         System.out.println("[GAME_OVER] Final winner: " + data);
+        
+        // 게임 오버 플래그 설정 및 타이머 즉시 중지
+        gamePanel.setGameOver(true);
         
         javax.swing.Timer returnTimer = new javax.swing.Timer(5000, e -> gamePanel.returnToLobby());
         returnTimer.setRepeats(false);
