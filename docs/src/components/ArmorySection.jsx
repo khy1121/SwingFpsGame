@@ -2,32 +2,55 @@ import React, { useState } from 'react';
 import { CHARACTERS } from '../data/gameData';
 import ChartComponent from './ChartComponent';
 
+// 맵 이미지 import
+import mapImage from '../assets/maps/map.png';
+import map2Image from '../assets/maps/map2.png';
+import map3Image from '../assets/maps/map3.png';
+import villageImage from '../assets/maps/village.png';
+
+// 캐릭터 스프라이트 import
+import ravenSprite from '../assets/characters/Raven_48_64.png';
+import piperSprite from '../assets/characters/Piper_48_64.png';
+import generalSprite from '../assets/characters/General_48_64.png';
+import technicianSprite from '../assets/characters/Technician_48_64.png';
+import wildcatSprite from '../assets/characters/wildcat_48_64.png';
+import sageSprite from '../assets/characters/Sage.png';
+
+const CHARACTER_SPRITES = {
+  raven: ravenSprite,
+  piper: piperSprite,
+  general: generalSprite,
+  technician: technicianSprite,
+  wildcat: wildcatSprite,
+  sage: sageSprite
+};
+
 // 맵 데이터
 const MAPS = {
   map: {
     name: 'Classic Arena',
-    image: '/src/assets/maps/map.png',
+    image: mapImage,
     size: '1280x720',
     description: '대칭 구조의 기본 맵. 중앙 광장과 좌우 복도로 구성되어 있으며, 균형잡힌 전투를 제공합니다.',
     features: ['중앙 광장 교전', '좌우 대칭 구조', '초보자 친화적', 'Red/Blue 스폰 균형']
   },
   map2: {
     name: 'Industrial Zone',
-    image: '/src/assets/maps/map2.png',
+    image: map2Image,
     size: '1280x720',
     description: '공장 지대를 모티브로 한 맵. 복잡한 통로와 엄폐물이 많아 전술적 플레이가 가능합니다.',
     features: ['다수의 엄폐물', '복잡한 동선', '매복 전략 유리', '좁은 통로 교전']
   },
   map3: {
     name: 'Desert Outpost',
-    image: '/src/assets/maps/map3.png',
+    image: map3Image,
     size: '1280x720',
     description: '사막 전초기지 테마. 넓은 공간과 장애물이 조화를 이루며, 장거리 저격과 근접전이 공존합니다.',
     features: ['개활지 중심', '전략적 장애물 배치', '저격 포지션', '빠른 템포']
   },
   village: {
     name: 'Abandoned Village',
-    image: '/src/assets/maps/village.png',
+    image: villageImage,
     size: '1280x720',
     description: '버려진 마을 맵. 건물 사이를 오가며 도심전을 즐길 수 있으며, 수직 구조가 특징입니다.',
     features: ['건물 밀집 지역', '다양한 고저차', '좁은 골목길', '어두운 분위기']
@@ -112,7 +135,7 @@ const ArmorySection = () => {
           {/* 캐릭터 이미지 */}
           <div className="md:col-span-3 bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
             <img 
-              src={`/src/assets/characters/${character.id}_48_64.png`}
+              src={CHARACTER_SPRITES[character.id]}
               alt={character.name}
               className="w-48 h-64 object-contain image-rendering-pixelated mb-4"
               style={{ imageRendering: 'pixelated' }}
