@@ -74,7 +74,7 @@ const ArchitectureSection = () => {
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Game Loop (60 FPS / 16ms)</h3>
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
           {[
             { step: 'Step 1', title: 'Update Logic', sub: 'Player Pos, Missiles' },
             { step: 'Step 2', title: 'Check Physics', sub: 'Collisions (200ms CD)' },
@@ -89,6 +89,120 @@ const ArchitectureSection = () => {
               {i < 2 && <div className="text-slate-300 transform rotate-90 md:rotate-0">➜</div>}
             </React.Fragment>
           ))}
+        </div>
+        
+        {/* Detailed Game Loop Explanation */}
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+          <div className="text-sm text-slate-700 space-y-2">
+            <div className="font-bold text-slate-800 mb-2">⏱️ 게임 루프 상세</div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-600">•</span>
+              <span><strong>javax.swing.Timer</strong>로 16ms마다 실행 (1000ms/60 = 16.67ms ≈ 60 FPS)</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-600">•</span>
+              <span><strong>EDT(Event Dispatch Thread)</strong>에서 실행되어 Swing 컴포넌트와 안전하게 상호작용</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-600">•</span>
+              <span><strong>updateGame()</strong>: 플레이어 이동, 미사일 업데이트, 충돌 감지, 스킬 쿨다운</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-600">•</span>
+              <span><strong>repaint()</strong>: GameRenderer가 RenderContext 기반으로 화면 그리기</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-600">•</span>
+              <span><strong>네트워크 스레드</strong>: 별도 스레드에서 서버 메시지 수신 (논블로킹)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Refactoring Journey */}
+      <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl shadow-lg p-6 text-white">
+        <h3 className="text-xl font-bold mb-4">🔄 리팩토링 여정</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">Before</div>
+            <div className="text-purple-100 text-sm space-y-1">
+              <div>• GamePanel: 3,811줄</div>
+              <div>• God Object 패턴</div>
+              <div>• 렌더링과 로직 혼재</div>
+              <div>• 중복 필드 다수</div>
+            </div>
+          </div>
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">Phase 1 & 2</div>
+            <div className="text-purple-100 text-sm space-y-1">
+              <div>• GameRenderer 추출</div>
+              <div>• 8개 Manager 분리</div>
+              <div>• 상태 중앙 관리</div>
+              <div>• 동기화 코드 제거</div>
+            </div>
+          </div>
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">After</div>
+            <div className="text-purple-100 text-sm space-y-1">
+              <div>• GamePanel: 3,107줄</div>
+              <div>• MVC + Manager 패턴</div>
+              <div>• SOLID 원칙 준수</div>
+              <div>• 800줄 코드 감소</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Server Architecture */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-800 mb-4">🖥️ 서버 아키텍처 (GameServer)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div className="font-bold text-slate-700 mb-3">멀티스레드 구조</div>
+            <div className="space-y-2 text-sm text-slate-600">
+              <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                <div className="font-bold text-purple-900">메인 스레드</div>
+                <div className="text-xs text-purple-700 mt-1">
+                  ServerSocket.accept()로 클라이언트 연결 대기
+                </div>
+              </div>
+              <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                <div className="font-bold text-purple-900">ClientHandler 스레드 (4개)</div>
+                <div className="text-xs text-purple-700 mt-1">
+                  각 클라이언트마다 독립 스레드로 메시지 처리
+                </div>
+              </div>
+              <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                <div className="font-bold text-purple-900">ConcurrentHashMap</div>
+                <div className="text-xs text-purple-700 mt-1">
+                  스레드 안전한 플레이어 데이터 관리
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div className="font-bold text-slate-700 mb-3">권위 서버 모델</div>
+            <div className="space-y-2 text-sm text-slate-600">
+              <div className="bg-indigo-50 p-3 rounded border border-indigo-200">
+                <div className="font-bold text-indigo-900">피해 판정</div>
+                <div className="text-xs text-indigo-700 mt-1">
+                  클라이언트가 HIT/HITME 보고 → 서버가 최종 검증
+                </div>
+              </div>
+              <div className="bg-indigo-50 p-3 rounded border border-indigo-200">
+                <div className="font-bold text-indigo-900">스킬 검증</div>
+                <div className="text-xs text-indigo-700 mt-1">
+                  쿨다운, 라운드 시간 제한 등 서버가 체크
+                </div>
+              </div>
+              <div className="bg-indigo-50 p-3 rounded border border-indigo-200">
+                <div className="font-bold text-indigo-900">브로드캐스트</div>
+                <div className="text-xs text-indigo-700 mt-1">
+                  검증된 이벤트만 모든 클라이언트에 전파
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

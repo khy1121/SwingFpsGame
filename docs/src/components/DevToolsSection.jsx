@@ -80,17 +80,76 @@ const DevToolsSection = () => (
         <h3 className="text-lg font-bold text-slate-800 mb-4">Future Roadmap</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {[
-            { color: 'bg-blue-500', text: 'UDP 프로토콜 도입 (위치 동기화 최적화)' },
-            { color: 'bg-blue-500', text: 'Dedicated Server (클라우드 배포)' },
-            { color: 'bg-blue-500', text: 'Replay System (경기 녹화 및 재생)' },
-            { color: 'bg-blue-500', text: '관전 모드 (Observer)' },
-            { color: 'bg-slate-300', text: 'Undo/Redo 기능 (맵 에디터)' },
-            { color: 'bg-slate-300', text: '브러시 크기 선택 (1x1, 2x2, 3x3)' }
+            { color: 'bg-blue-500', text: 'UDP 프로토콜 도입 (위치 동기화 최적화)', priority: 'HIGH' },
+            { color: 'bg-blue-500', text: 'Dedicated Server (클라우드 배포)', priority: 'HIGH' },
+            { color: 'bg-blue-500', text: 'Replay System (경기 녹화 및 재생)', priority: 'MEDIUM' },
+            { color: 'bg-blue-500', text: '관전 모드 (Observer)', priority: 'MEDIUM' },
+            { color: 'bg-slate-300', text: 'Undo/Redo 기능 (맵 에디터)', priority: 'LOW' },
+            { color: 'bg-slate-300', text: '브러시 크기 선택 (1x1, 2x2, 3x3)', priority: 'LOW' }
           ].map((item, i) => (
-            <li key={i} className="flex items-center text-slate-600 text-sm">
-              <span className={`w-2 h-2 ${item.color} rounded-full mr-3`}></span>
-              {item.text}
-            </li>
+            <div key={i} className="flex items-center justify-between text-slate-600 text-sm p-2 bg-slate-50 rounded">
+              <div className="flex items-center">
+                <span className={`w-2 h-2 ${item.color} rounded-full mr-3`}></span>
+                {item.text}
+              </div>
+              <span className={`text-xs px-2 py-1 rounded ${item.priority === 'HIGH' ? 'bg-red-100 text-red-700' : item.priority === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>
+                {item.priority}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Testing & Quality Assurance */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 md:col-span-2">
+        <h3 className="text-lg font-bold text-slate-800 mb-4">🧪 테스트 & 품질 보증</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+            <div className="font-bold text-emerald-900 mb-2">수동 테스트</div>
+            <div className="text-sm text-emerald-800 space-y-1">
+              <div>• 4인 동시 접속 테스트</div>
+              <div>• 맵별 밸런스 체크</div>
+              <div>• 캐릭터 스킬 검증</div>
+              <div>• 네트워크 지연 시뮬레이션</div>
+            </div>
+          </div>
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <div className="font-bold text-blue-900 mb-2">코드 리뷰</div>
+            <div className="text-sm text-blue-800 space-y-1">
+              <div>• Claude AI와 협업 리뷰</div>
+              <div>• SOLID 원칙 검증</div>
+              <div>• 코드 중복 제거</div>
+              <div>• 성능 최적화 제안</div>
+            </div>
+          </div>
+          <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+            <div className="font-bold text-purple-900 mb-2">버그 추적</div>
+            <div className="text-sm text-purple-800 space-y-1">
+              <div>• GitHub Issues 활용</div>
+              <div>• 주간 보고서 작성</div>
+              <div>• 문제점 문서화</div>
+              <div>• 해결 과정 기록</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Development Workflow */}
+      <div className="bg-gradient-to-r from-cyan-600 to-blue-600 rounded-xl shadow-lg p-6 text-white md:col-span-2">
+        <h3 className="text-xl font-bold mb-4">🔄 개발 워크플로우</h3>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {[
+            { step: '1', title: '기능 설계', desc: '요구사항 분석' },
+            { step: '2', title: '구현', desc: '코드 작성' },
+            { step: '3', title: '테스트', desc: '동작 검증' },
+            { step: '4', title: '리뷰', desc: 'AI 코드 리뷰' },
+            { step: '5', title: '배포', desc: 'Git Push' }
+          ].map((item, i) => (
+            <div key={i} className="bg-white/10 p-4 rounded-lg text-center">
+              <div className="text-3xl font-bold mb-2">{item.step}</div>
+              <div className="font-bold text-sm mb-1">{item.title}</div>
+              <div className="text-xs text-cyan-100">{item.desc}</div>
+            </div>
           ))}
         </div>
       </div>
