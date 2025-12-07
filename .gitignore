@@ -46,3 +46,9 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# Node.js / React (docs folder)
+docs/node_modules/
+docs/dist/
+docs/.vite/
+docs/package-lock.json
