@@ -1,5 +1,6 @@
 export const CHARACTERS = {
   raven: {
+    id: 'Raven',
     name: 'Raven', 
     role: 'Speed / Assault', 
     desc: '순간이동(Dash)과 공격 속도 증가(Overcharge)를 사용하는 기동성 중심의 캐릭터입니다.',
@@ -10,6 +11,7 @@ export const CHARACTERS = {
     ]
   },
   piper: {
+    id: 'Piper',
     name: 'Piper', 
     role: 'Sniper / Recon', 
     desc: '긴 사거리와 시야 확보(Mark)에 특화된 저격수입니다.',
@@ -20,6 +22,7 @@ export const CHARACTERS = {
     ]
   },
   general: {
+    id: 'General',
     name: 'General', 
     role: 'Support / Buffer', 
     desc: '주변 아군에게 버프를 제공하고 광역 폭격(Airstrike)을 지원합니다.',
@@ -30,6 +33,7 @@ export const CHARACTERS = {
     ]
   },
   technician: {
+    id: 'Technician',
     name: 'Technician', 
     role: 'Defense / Trap', 
     desc: '지뢰와 터렛을 설치하여 지역을 장악하는 수비형 캐릭터입니다.',
@@ -40,6 +44,7 @@ export const CHARACTERS = {
     ]
   },
   wildcat: {
+    id: 'wildcat',
     name: 'Wildcat', 
     role: 'Melee / Burst', 
     desc: '근접전에 특화되어 있으며 적진을 돌파합니다.',
@@ -50,6 +55,7 @@ export const CHARACTERS = {
     ]
   },
   sage: {
+    id: 'Sage',
     name: 'Sage', 
     role: 'Healer', 
     desc: '아군의 체력을 회복시키고 부활시킵니다.',
