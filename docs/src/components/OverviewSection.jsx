@@ -37,6 +37,37 @@ const OverviewSection = () => {
         ))}
       </div>
 
+      {/* Project Evolution Timeline */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+        <h3 className="text-xl font-bold mb-4">🚀 프로젝트 진화 과정</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">10월 ~ 11월</div>
+            <div className="text-indigo-100 text-sm space-y-1">
+              <div>• 기본 게임 시스템 구축</div>
+              <div>• 로비 및 네트워크 기능</div>
+              <div>• 캐릭터 스킬 구현</div>
+            </div>
+          </div>
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">11월 말</div>
+            <div className="text-indigo-100 text-sm space-y-1">
+              <div>• UI/UX 대폭 개선</div>
+              <div>• 스킬 이펙트 시스템</div>
+              <div>• 코드 정리 작업</div>
+            </div>
+          </div>
+          <div className="bg-white/10 p-4 rounded-lg">
+            <div className="text-2xl font-bold mb-2">12월 초</div>
+            <div className="text-indigo-100 text-sm space-y-1">
+              <div>• Phase 1: 렌더링 분리</div>
+              <div>• Phase 2: 상태 관리 통합</div>
+              <div>• SOLID 원칙 적용</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-bold text-slate-800 mb-4">기술 스택 구성 (Tech Stack)</h3>
@@ -61,6 +92,33 @@ const OverviewSection = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Key Metrics */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-800 mb-6">📊 프로젝트 통계</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <div className="text-3xl font-bold text-slate-800">51</div>
+            <div className="text-sm text-slate-600 mt-1">Java 파일</div>
+          </div>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <div className="text-3xl font-bold text-slate-800">15K+</div>
+            <div className="text-sm text-slate-600 mt-1">코드 라인</div>
+          </div>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <div className="text-3xl font-bold text-slate-800">27</div>
+            <div className="text-sm text-slate-600 mt-1">프로토콜</div>
+          </div>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <div className="text-3xl font-bold text-slate-800">22</div>
+            <div className="text-sm text-slate-600 mt-1">이펙트 클래스</div>
+          </div>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <div className="text-3xl font-bold text-slate-800">800</div>
+            <div className="text-sm text-slate-600 mt-1">코드 감소(줄)</div>
           </div>
         </div>
       </div>
