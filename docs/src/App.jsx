@@ -17,6 +17,7 @@ import NetworkSection from './components/NetworkSection';
 import FeaturesSection from './components/FeaturesSection';
 import CodeSection from './components/CodeSection';
 import DevToolsSection from './components/DevToolsSection';
+import ProjectReportSection from './components/ProjectReportSection';
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -39,6 +40,7 @@ const App = () => {
     { id: 'network', label: '네트워크 & 프로토콜', icon: Activity },
     { id: 'features', label: '주요 기능', icon: Wrench },
     { id: 'code', label: '코드 분석', icon: Activity },
+    { id: 'report', label: '프로젝트 보고서', icon: Monitor },
     { id: 'devtools', label: '개발 도구', icon: Wrench }
   ];
 
@@ -103,6 +105,7 @@ const App = () => {
         {activeTab === 'network' && <NetworkSection />}
         {activeTab === 'features' && <FeaturesSection />}
         {activeTab === 'code' && <CodeSection />}
+        {activeTab === 'report' && <ProjectReportSection />}
         {activeTab === 'devtools' && <DevToolsSection />}
       </main>
 
