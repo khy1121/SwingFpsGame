@@ -28,32 +28,32 @@ const CHARACTER_SPRITES = {
 // 맵 데이터
 const MAPS = {
   map: {
-    name: 'Classic Arena',
+    name: 'Maze Garden',
     image: mapImage,
     size: '1280x720',
-    description: '대칭 구조의 기본 맵. 중앙 광장과 좌우 복도로 구성되어 있으며, 균형잡힌 전투를 제공합니다.',
-    features: ['중앙 광장 교전', '좌우 대칭 구조', '초보자 친화적', 'Red/Blue 스폰 균형']
+    description: '높은 벽과 잔디밭으로 구획된 미로형 구조의 맵. 시야가 제한되는 직각 코너와 은폐 가능한 수풀 지역이 많아, 기습 공격과 근거리 게릴라 전술에 최적화되어 있습니다.',
+    features: ['복잡한 미로 구조', '근거리 기습 전투', '시야 차단 심리전', '수풀 은폐/엄폐']
   },
   map2: {
-    name: 'Industrial Zone',
+    name: 'Waterway Bridge',
     image: map2Image,
     size: '1280x720',
-    description: '공장 지대를 모티브로 한 맵. 복잡한 통로와 엄폐물이 많아 전술적 플레이가 가능합니다.',
-    features: ['다수의 엄폐물', '복잡한 동선', '매복 전략 유리', '좁은 통로 교전']
+    description: '수로가 흐르는 평화로운 수변 공원 형태의 맵. 중앙의 십자형 다리를 중심으로 4개의 구역이 나뉘어 있으며, 다리 위에서의 힘싸움과 수로를 건너는 기동전이 동시에 요구됩니다.',
+    features: ['중앙 십자 다리 교전', '개방형 수변 지형', '다양한 진입 경로', '나무 엄폐물 활용']
   },
   map3: {
-    name: 'Desert Outpost',
+    name: 'Island Bridges',
     image: map3Image,
     size: '1280x720',
-    description: '사막 전초기지 테마. 넓은 공간과 장애물이 조화를 이루며, 장거리 저격과 근접전이 공존합니다.',
-    features: ['개활지 중심', '전략적 장애물 배치', '저격 포지션', '빠른 템포']
+    description: '바다 위에 떠 있는 여러 섬들이 긴 나무 다리로 연결된 군도 형태의 맵. 좁고 긴 다리는 주요 병목 구간(Choke Point)으로 작용하며, 섬과 섬 사이를 이동할 때 장거리 사격에 노출될 위험이 큽니다.',
+    features: ['다리 위 병목 전투', '섬 지역 점령전', '낙사/도하 위험', '장거리 견제 유리']
   },
   village: {
-    name: 'Abandoned Village',
+    name: 'Ancient Garden',
     image: villageImage,
     size: '1280x720',
-    description: '버려진 마을 맵. 건물 사이를 오가며 도심전을 즐길 수 있으며, 수직 구조가 특징입니다.',
-    features: ['건물 밀집 지역', '다양한 고저차', '좁은 골목길', '어두운 분위기']
+    description: '화려한 꽃과 고대 석조물이 어우러진 신비로운 신전 정원 맵. 복잡하게 얽힌 돌담과 장식물들이 동선을 제한하며, 중앙과 측면의 주요 거점을 차지하기 위한 전략적 팀플레이가 중요합니다.',
+    features: ['전략적 거점 방어', '복잡한 장애물 배치', '판타지풍 비주얼', '좁은 골목 교전']
   }
 };
 
