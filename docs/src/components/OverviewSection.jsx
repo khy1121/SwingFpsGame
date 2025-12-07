@@ -3,7 +3,7 @@ import ChartComponent from './ChartComponent';
 
 const OverviewSection = () => {
   const chartData = {
-    labels: ['Client (Swing/GamePanel)', 'Server (TCP Socket)', 'Managers (8개)', 'Effects (22개)'],
+    labels: ['Client (Swing/GamePanel)', 'Server (TCP Socket)', 'Managers (8개)', 'Effects (24개)'],
     datasets: [{
       data: [35, 25, 25, 15],
       backgroundColor: ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'],
@@ -17,8 +17,8 @@ const OverviewSection = () => {
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Java Swing 기반 멀티플레이어 FPS (SwingFpsGame)</h1>
         <p className="text-slate-600 max-w-3xl">
           순수 Java Swing/AWT로 개발된 2D 탑다운 슈팅 게임입니다. 
-          2,661줄의 GamePanel을 8개의 Manager 클래스로 리팩토링하여 MVC 패턴 기반의 견고하고 확장 가능한 아키텍처를 구축했습니다.
-          10개 캐릭터(4개 활성), 22개 스킬 이펙트, 60 FPS 게임 루프를 특징으로 합니다.
+          방대한 GamePanel을 8개의 Manager 클래스로 리팩토링하여 MVC 패턴 기반의 견고하고 확장 가능한 아키텍처를 구축했습니다.
+          10개 캐릭터(4개 활성), 24개 스킬 이펙트, 60 FPS 게임 루프를 특징으로 합니다.
         </p>
       </div>
 
@@ -79,9 +79,9 @@ const OverviewSection = () => {
           <h3 className="text-lg font-bold text-slate-800 mb-4">핵심 구현 기능</h3>
           <div className="space-y-4">
             {[
-              { id: 1, title: 'Phase 2 리팩토링', desc: '2,539줄 GamePanel을 8개 Manager 클래스로 분리하여 유지보수성 개선. MVC + Manager 패턴 적용.' },
-              { id: 2, title: '네트워크 동기화', desc: 'TCP Socket 기반 멀티스레드 서버(1,199줄). 20+ 프로토콜 타입, 200ms 피격 쿨다운 최적화.' },
-              { id: 3, title: '캐릭터 시스템', desc: '10개 캐릭터(4개 활성: Raven, Piper, Technician, General). 22개 스킬 이펙트 클래스로 시각 피드백 구현.' },
+              { id: 1, title: 'Phase 2 리팩토링', desc: '방대한 GamePanel을 8개 Manager 클래스로 분리하여 유지보수성 개선. MVC + Manager 패턴 적용.' },
+              { id: 2, title: '네트워크 동기화', desc: 'TCP Socket 기반 멀티스레드 서버(1,093줄). 16개 프로토콜 타입(JOIN, CHAT, TEAM, POS, SHOOT, HIT 등), 200ms 피격 쿨다운.' },
+              { id: 3, title: '캐릭터 시스템', desc: '10개 캐릭터(4개 활성: Raven, Piper, Technician, General). 24개 스킬 이펙트 클래스로 시각 피드백 구현.' },
               { id: 4, title: '확장성', desc: 'JSON 맵 데이터(F3/F4/F5 에디터), Factory 패턴 기반 스킬 생성. 콘텐츠 추가 용이.' }
             ].map((item) => (
               <div key={item.id} className="flex items-start">

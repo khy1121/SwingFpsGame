@@ -112,25 +112,61 @@ const ArmorySection = () => {
 
       {/* 캐릭터 섹션 */}
       {activeTab === 'characters' && (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-          <div className="md:col-span-3 space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Select Class</label>
-            <div className="space-y-1">
-              {Object.keys(CHARACTERS).map(key => (
-                <button
-                  key={key}
-                  onClick={() => setSelectedCharKey(key)}
-                  className={`w-full text-left px-4 py-3 rounded border transition-colors text-sm font-medium flex justify-between items-center ${
-                    selectedCharKey === key 
-                      ? 'bg-blue-50 border-blue-300 text-blue-700' 
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {CHARACTERS[key].name}
-                </button>
-              ))}
+        <>
+          {/* 전체 캐릭터 스탯 비교 (CharacterData.java 기준) */}
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+            <h3 className="text-xl font-bold text-slate-800 mb-4">📊 전체 캐릭터 스탯 비교 (10개)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="p-2 text-left">캐릭터</th>
+                    <th className="p-2 text-center">역할</th>
+                    <th className="p-2 text-center">체력</th>
+                    <th className="p-2 text-center">속도</th>
+                    <th className="p-2 text-center">방어력</th>
+                    <th className="p-2 text-center">상태</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-600">
+                  <tr className="border-b bg-green-50"><td className="p-2 font-bold">Raven</td><td className="p-2 text-center">공격형</td><td className="p-2 text-center">100</td><td className="p-2 text-center">6.5</td><td className="p-2 text-center">20</td><td className="p-2 text-center"><span className="px-2 py-1 bg-green-600 text-white rounded text-xs">활성</span></td></tr>
+                  <tr className="border-b bg-green-50"><td className="p-2 font-bold">Piper</td><td className="p-2 text-center">정찰형</td><td className="p-2 text-center">80</td><td className="p-2 text-center">5.5</td><td className="p-2 text-center">15</td><td className="p-2 text-center"><span className="px-2 py-1 bg-green-600 text-white rounded text-xs">활성</span></td></tr>
+                  <tr className="border-b bg-green-50"><td className="p-2 font-bold">Technician</td><td className="p-2 text-center">지원형</td><td className="p-2 text-center">100</td><td className="p-2 text-center">5.0</td><td className="p-2 text-center">8</td><td className="p-2 text-center"><span className="px-2 py-1 bg-green-600 text-white rounded text-xs">활성</span></td></tr>
+                  <tr className="border-b bg-green-50"><td className="p-2 font-bold">General</td><td className="p-2 text-center">밸런스형</td><td className="p-2 text-center">120</td><td className="p-2 text-center">5.0</td><td className="p-2 text-center">12</td><td className="p-2 text-center"><span className="px-2 py-1 bg-green-600 text-white rounded text-xs">활성</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Bulldog</td><td className="p-2 text-center">탱커</td><td className="p-2 text-center">200</td><td className="p-2 text-center">4.5</td><td className="p-2 text-center">40</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Wildcat</td><td className="p-2 text-center">돌격형</td><td className="p-2 text-center">110</td><td className="p-2 text-center">5.2</td><td className="p-2 text-center">10</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Ghost</td><td className="p-2 text-center">암살형</td><td className="p-2 text-center">120</td><td className="p-2 text-center">6.0</td><td className="p-2 text-center">1</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Skull</td><td className="p-2 text-center">공격형</td><td className="p-2 text-center">120</td><td className="p-2 text-center">5.0</td><td className="p-2 text-center">12</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Steam</td><td className="p-2 text-center">밸런스형</td><td className="p-2 text-center">110</td><td className="p-2 text-center">5.4</td><td className="p-2 text-center">10</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                  <tr className="border-b"><td className="p-2 font-bold text-slate-400">Sage</td><td className="p-2 text-center">힐러</td><td className="p-2 text-center">100</td><td className="p-2 text-center">5.3</td><td className="p-2 text-center">8</td><td className="p-2 text-center"><span className="px-2 py-1 bg-slate-300 text-slate-600 rounded text-xs">미구현</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-3 text-xs text-slate-500">
+              * 체력: HP, 속도: 이동속도(픽셀/프레임), 방어력: 데미지 감소율(%)
             </div>
           </div>
+
+          {/* 캐릭터 상세 정보 */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <div className="md:col-span-3 space-y-2">
+              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Select Class</label>
+              <div className="space-y-1">
+                {Object.keys(CHARACTERS).map(key => (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedCharKey(key)}
+                    className={`w-full text-left px-4 py-3 rounded border transition-colors text-sm font-medium flex justify-between items-center ${
+                      selectedCharKey === key 
+                        ? 'bg-blue-50 border-blue-300 text-blue-700' 
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {CHARACTERS[key].name}
+                  </button>
+                ))}
+              </div>
+            </div>
 
           {/* 캐릭터 이미지 */}
           <div className="md:col-span-3 bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
@@ -181,6 +217,7 @@ const ArmorySection = () => {
             />
           </div>
         </div>
+        </>
       )}
 
       {/* 맵 섹션 */}

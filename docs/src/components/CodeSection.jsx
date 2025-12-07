@@ -748,7 +748,7 @@ public void update() {
 
     skilleffect: {
       title: '스킬 이펙트 구현',
-      description: 'SkillEffect 추상 클래스를 상속받아 22개 캐릭터별 스킬 이펙트 구현. 각 이펙트는 duration 동안 remaining 시간을 감소시키며, Graphics2D로 링/아크/라인을 그립니다.',
+      description: 'SkillEffect 추상 클래스를 상속받아 24개 캐릭터별 스킬 이펙트 구현 (22개 실제 이펙트 + SkillEffect 추상 클래스 + SkillEffectManager). 각 이펙트는 duration 동안 remaining 시간을 감소시키며, Graphics2D로 링/아크/라인을 그립니다.',
       language: 'java',
       code: `// SkillEffect.java - 추상 기본 클래스
 public abstract class SkillEffect {

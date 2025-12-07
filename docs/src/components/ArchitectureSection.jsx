@@ -126,7 +126,7 @@ const ArchitectureSection = () => {
           <div className="bg-white/10 p-4 rounded-lg">
             <div className="text-2xl font-bold mb-2">Before</div>
             <div className="text-purple-100 text-sm space-y-1">
-              <div>• GamePanel: 3,811줄</div>
+              <div>• GamePanel: 모놀리식</div>
               <div>• God Object 패턴</div>
               <div>• 렌더링과 로직 혼재</div>
               <div>• 중복 필드 다수</div>
@@ -144,10 +144,10 @@ const ArchitectureSection = () => {
           <div className="bg-white/10 p-4 rounded-lg">
             <div className="text-2xl font-bold mb-2">After</div>
             <div className="text-purple-100 text-sm space-y-1">
-              <div>• GamePanel: 3,107줄</div>
+              <div>• GamePanel: 2,413줄 (현재)</div>
               <div>• MVC + Manager 패턴</div>
               <div>• SOLID 원칙 준수</div>
-              <div>• 800줄 코드 감소</div>
+              <div>• 코드 분리 및 정리</div>
             </div>
           </div>
         </div>
@@ -173,9 +173,9 @@ const ArchitectureSection = () => {
                 </div>
               </div>
               <div className="bg-purple-50 p-3 rounded border border-purple-200">
-                <div className="font-bold text-purple-900">ConcurrentHashMap</div>
+                <div className="font-bold text-purple-900">6개 ConcurrentHashMap</div>
                 <div className="text-xs text-purple-700 mt-1">
-                  스레드 안전한 플레이어 데이터 관리
+                  clients (플레이어), placedObjects (지뢰/터렛), activeAuras (버프), scheduledStrikes (공습), playerCharacterChanged (캐릭터 변경 추적) - 멀티스레드 안전 보장
                 </div>
               </div>
             </div>

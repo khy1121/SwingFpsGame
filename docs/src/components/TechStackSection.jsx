@@ -295,7 +295,7 @@ const TechStackSection = () => {
           <div>SwingFpsGame/</div>
           <div className="ml-4">├── src/com/fpsgame/</div>
           <div className="ml-8">│   ├── client/</div>
-          <div className="ml-12 text-emerald-400">│   │   ├── GamePanel.java (2,661줄 → 리팩토링)</div>
+          <div className="ml-12 text-emerald-400">│   │   ├── GamePanel.java (2,413줄 - 현재)</div>
           <div className="ml-12 text-emerald-400">│   │   ├── GameState.java (437줄)</div>
           <div className="ml-12 text-emerald-400">│   │   ├── GameRenderer.java (785줄)</div>
           <div className="ml-12 text-emerald-400">│   │   ├── NetworkClient.java (150줄)</div>
@@ -308,7 +308,7 @@ const TechStackSection = () => {
           <div className="ml-12 text-emerald-400">│   │   ├── PlayerMovementController.java (195줄)</div>
           <div className="ml-12 text-emerald-400">│   │   └── SpawnManager.java (~150줄)</div>
           <div className="ml-8">│   ├── server/</div>
-          <div className="ml-12 text-blue-400">│   │   ├── GameServer.java (1,199줄)</div>
+          <div className="ml-12 text-blue-400">│   │   ├── GameServer.java (1,093줄)</div>
           <div className="ml-12 text-blue-400">│   │   └── ClientHandler.java</div>
           <div className="ml-8">│   ├── common/</div>
           <div className="ml-12 text-amber-400">│   │   ├── CharacterData.java (291줄, 10 캐릭터)</div>
@@ -316,7 +316,7 @@ const TechStackSection = () => {
           <div className="ml-12 text-amber-400">│   │   ├── PlayerData.java</div>
           <div className="ml-12 text-amber-400">│   │   ├── Missile.java</div>
           <div className="ml-12 text-amber-400">│   │   └── Obstacle.java</div>
-          <div className="ml-8">│   └── effects/ (22개 스킬 이펙트 클래스)</div>
+          <div className="ml-8">│   └── effects/ (24개 스킬 이펙트 클래스)</div>
           <div className="ml-12 text-purple-400">│       ├── RavenDashEffect.java</div>
           <div className="ml-12 text-purple-400">│       ├── PiperMarkEffect.java</div>
           <div className="ml-12 text-purple-400">│       ├── GeneralAuraEffect.java</div>
@@ -348,7 +348,7 @@ const TechStackSection = () => {
               <div className="text-xs text-slate-600">캐릭터 (4개 활성)</div>
             </div>
             <div className="bg-white p-3 rounded text-center">
-              <div className="text-2xl font-bold text-amber-600">22개</div>
+              <div className="text-2xl font-bold text-amber-600">24개</div>
               <div className="text-xs text-slate-600">스킬 이펙트</div>
             </div>
           </div>

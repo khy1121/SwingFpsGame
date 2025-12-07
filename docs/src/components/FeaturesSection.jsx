@@ -143,7 +143,93 @@ const FeaturesSection = () => {
         </div>
       </div>
 
+      {/* Round System */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+        <h3 className="text-xl font-bold text-slate-800 mb-4">⏱️ 라운드 시스템</h3>
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div className="text-center p-3 bg-white rounded">
+              <div className="text-2xl font-bold text-blue-600">10초</div>
+              <div className="text-xs text-slate-600 mt-1">WAITING 단계 (준비 시간)</div>
+              <div className="text-xs text-slate-500 mt-1">캐릭터 변경 가능 (1회 제한)</div>
+            </div>
+            <div className="text-center p-3 bg-white rounded">
+              <div className="text-2xl font-bold text-green-600">PLAYING</div>
+              <div className="text-xs text-slate-600 mt-1">전투 진행 (시간 제한 없음)</div>
+              <div className="text-xs text-slate-500 mt-1">한 팀 전멸 시 종료</div>
+            </div>
+            <div className="text-center p-3 bg-white rounded">
+              <div className="text-2xl font-bold text-purple-600">3판 2선승</div>
+              <div className="text-xs text-slate-600 mt-1">먼저 2라운드 승리 시 승리</div>
+              <div className="text-xs text-slate-500 mt-1">라운드마다 맵 랜덤 선택</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 캐릭터 스킬 시스템 */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+        <h3 className="text-xl font-bold text-slate-800 mb-4">🎮 Ability 시스템 구조 (Ability.java)</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <div className="font-bold text-blue-900 mb-2">3가지 스킬 타입</div>
+            <div className="space-y-1 text-sm text-blue-700">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs">BASIC</span>
+                <span className="text-xs">기본 스킬 (E)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-purple-600 text-white rounded text-xs">TACTICAL</span>
+                <span className="text-xs">전술 스킬 (R)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-red-600 text-white rounded text-xs">ULTIMATE</span>
+                <span className="text-xs">궁극기 (F, 현재 미사용)</span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+            <div className="font-bold text-purple-900 mb-2">Ability 필드 (8개)</div>
+            <div className="text-xs text-purple-700 space-y-0.5 font-mono">
+              <div>• id, name, description</div>
+              <div>• type (AbilityType enum)</div>
+              <div>• cooldown (쿨다운 시간)</div>
+              <div>• duration (지속 시간)</div>
+              <div>• range (사거리)</div>
+              <div>• damage (데미지)</div>
+            </div>
+          </div>
+          
+          <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+            <div className="font-bold text-green-900 mb-2">런타임 상태 관리</div>
+            <div className="text-xs text-green-700 space-y-0.5 font-mono">
+              <div>• currentCooldown (현재 쿨다운)</div>
+              <div>• isActive (활성화 여부)</div>
+              <div>• activeDuration (활성 지속시간)</div>
+              <div>• cooldownMultiplier (배율 조정)</div>
+            </div>
+            <div className="mt-2 text-xs text-green-600">
+              💡 버프/디버프로 런타임 조정 가능
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+          <div className="font-bold text-slate-800 mb-2 text-sm">CharacterData.java - 각 캐릭터당 3개 스킬 정의</div>
+          <pre className="bg-slate-800 text-green-400 p-3 rounded text-xs overflow-x-auto">
+{`private List<Ability> createAbilities() {
+    return Arrays.asList(
+        new Ability("dash", "대쉬", "...", AbilityType.BASIC, 5.0f, 0.5f, 200.0f, 0),
+        new Ability("overcharge", "과충전", "...", AbilityType.TACTICAL, 20.0f, 6.0f, 0.0f, 0),
+        new Ability("none", "없음", "", AbilityType.ULTIMATE, 0, 0, 0, 0)
+    );
+}`}</pre>
+        </div>
+      </div>
+
+      {/* 캐릭터 스킬 상세 */}
       <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
         <h3 className="text-xl font-bold text-slate-800 mb-4">캐릭터 스킬 시스템 (4개 캐릭터 활성화)</h3>
         

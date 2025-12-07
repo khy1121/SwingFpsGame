@@ -296,7 +296,7 @@ const ProjectReportSection = () => {
           </h4>
           <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
             <div className="text-sm text-indigo-900 mb-3">
-              <strong>GameMessageHandler</strong>가 20+ 프로토콜 메시지를 라우팅하여 게임 상태를 업데이트합니다.
+              <strong>GameMessageHandler</strong>가 16개 프로토콜 메시지(JOIN, CHAT, TEAM, CHARACTER_SELECT, READY, UNREADY, START, POS, SHOOT, SKILL, HIT_OBJ, HIT, HITME, DEATH, RESPAWN, QUIT)를 라우팅하여 게임 상태를 업데이트합니다.
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {[
@@ -361,9 +361,9 @@ const ProjectReportSection = () => {
             <h4 className="font-bold text-slate-700 mb-3">스킬 시스템</h4>
             <div className="space-y-2 text-sm text-slate-600">
               <div className="bg-purple-50 p-3 rounded border border-purple-200">
-                <div className="font-bold text-purple-900">22개 이펙트 클래스</div>
+                <div className="font-bold text-purple-900">24개 이펙트 클래스</div>
                 <div className="text-xs text-purple-700 mt-1">
-                  RavenDashEffect, PiperSonarEffect, BulldogBarrageEffect 등
+                  SkillEffect 추상 클래스 상속: RavenDashEffect, RavenOverchargeEffect, PiperMarkEffect, PiperThermalEffect, TechMineEffect, TechTurretEffect, GeneralAuraEffect, GeneralStrikeEffect, BulldogBarrageEffect, BulldogCoverEffect, WildcatBreachEffect, WildcatBerserkEffect, GhostCloakEffect, GhostNullifyEffect, SkullAdrenalineEffect, SkullAmmoEffect, SteamEmpEffect, SteamResetEffect, SageHealEffect, SageReviveEffect, TurretShootEffect, MuzzleFlashEffect + SkillEffectManager, SkillEffect
                 </div>
               </div>
               <div className="bg-purple-50 p-3 rounded border border-purple-200">
@@ -388,7 +388,7 @@ const ProjectReportSection = () => {
               <div className="bg-green-50 p-3 rounded border border-green-200">
                 <div className="font-bold text-green-900">JSON 기반 데이터</div>
                 <div className="text-xs text-green-700 mt-1">
-                  walkable 2D 배열 + obstacles 좌표
+                  meta: {'{map_pixel_size, tile_size:32}'}, obstacles: {'[{x,y}]'} 배열 (2000+ 타일), spawn_zones 정의. map.json은 2400x1600px (75x50 타일)
                 </div>
               </div>
               <div className="bg-green-50 p-3 rounded border border-green-200">
