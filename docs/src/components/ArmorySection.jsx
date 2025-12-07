@@ -135,7 +135,7 @@ const ArmorySection = () => {
           {/* 캐릭터 이미지 */}
           <div className="md:col-span-3 bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
             <img 
-              src={CHARACTER_SPRITES[character.id]}
+              src={CHARACTER_SPRITES[selectedCharKey]}
               alt={character.name}
               className="w-48 h-64 object-contain image-rendering-pixelated mb-4"
               style={{ imageRendering: 'pixelated' }}
