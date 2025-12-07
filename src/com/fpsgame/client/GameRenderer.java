@@ -5,8 +5,12 @@ import com.fpsgame.common.Ability;
 import com.fpsgame.common.CharacterData;
 import com.fpsgame.common.GameConstants;
 import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import javax.imageio.ImageIO;
 
 /**
  * GameRenderer - 게임 렌더링 전담
@@ -23,8 +27,22 @@ public class GameRenderer {
     private static final float PIPER_MARK_RANGE_FACTOR = 1.5f;
     private static final int PIPER_THERMAL_DOT_SIZE = 10;
     
+    // 미사일 이미지
+    private BufferedImage bulletImage;
+    
     public GameRenderer() {
         // 파라미터 없는 생성자 - 렌더링에 필요한 데이터는 메서드 파라미터로 전달
+        loadBulletImage();
+    }
+    
+    private void loadBulletImage() {
+        try {
+            bulletImage = ImageIO.read(new File("assets/bullets/raven_bullet.png"));
+            System.out.println("[BULLET] Loaded bullet image: " + bulletImage.getWidth() + "x" + bulletImage.getHeight());
+        } catch (Exception e) {
+            System.err.println("[BULLET] Failed to load bullet image: " + e.getMessage());
+            bulletImage = null;
+        }
     }
     
     /**
@@ -80,6 +98,12 @@ public class GameRenderer {
         }
         drawHUD(g2d, ctx);
         drawRoundInfo(g2d, ctx);
+        drawTeamStatus(g2d, ctx);
+        
+        // 11. TAB 스코어보드 (최상위)
+        if (ctx.showScoreboard) {
+            drawScoreboard(g2d, ctx);
+        }
     }
     
     private void drawMap(Graphics2D g2d, RenderContext ctx) {
@@ -150,6 +174,12 @@ public class GameRenderer {
     private void drawOtherPlayers(Graphics2D g2d, RenderContext ctx) {
         for (Map.Entry<String, GamePanel.PlayerData> entry : ctx.players.entrySet()) {
             GamePanel.PlayerData p = entry.getValue();
+            
+            // 사망한 플레이어는 렌더링하지 않음
+            if (p.hp <= 0) {
+                continue;
+            }
+            
             int screenX = p.x - ctx.cameraX;
             int screenY = p.y - ctx.cameraY;
             
@@ -176,6 +206,11 @@ public class GameRenderer {
     }
     
     private void drawLocalPlayer(Graphics2D g2d, RenderContext ctx) {
+        // 사망 시 자신의 캐릭터 렌더링 스킵
+        if (ctx.myHP <= 0) {
+            return;
+        }
+
         int myScreenX = ctx.playerX - ctx.cameraX;
         int myScreenY = ctx.playerY - ctx.cameraY;
         
@@ -276,12 +311,18 @@ public class GameRenderer {
     }
     
     private void drawMissiles(Graphics2D g2d, RenderContext ctx) {
-        g2d.setColor(Color.YELLOW);
         for (GameObjectManager.Missile m : ctx.missiles) {
-            int mScreenX = m.x - ctx.cameraX;
-            int mScreenY = m.y - ctx.cameraY;
+            int mScreenX = (int)m.x - ctx.cameraX;
+            int mScreenY = (int)m.y - ctx.cameraY;
             if (isOnScreen(mScreenX, mScreenY, ctx)) {
-                g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
+                if (bulletImage != null) {
+                    // 16x16 이미지를 8x8로 다운스케일하여 렌더링
+                    g2d.drawImage(bulletImage, mScreenX - 4, mScreenY - 4, 8, 8, null);
+                } else {
+                    // 이미지 로드 실패 시 기본 노란 원
+                    g2d.setColor(Color.YELLOW);
+                    g2d.fillOval(mScreenX - 4, mScreenY - 4, 8, 8);
+                }
             }
         }
     }
@@ -393,32 +434,65 @@ public class GameRenderer {
         g2d.setColor(Color.WHITE);
         g2d.drawRect(minimapX, minimapY, minimapWidth, minimapHeight);
         
-        int viewX = minimapX + Math.round(ctx.cameraX * scaleX);
-        int viewY = minimapY + Math.round(ctx.cameraY * scaleY);
+        // 팀원들의 시야 범위 먼저 그리기 (네모 박스)
         int viewW = Math.max(1, Math.round(GameConstants.GAME_WIDTH * scaleX));
         int viewH = Math.max(1, Math.round(GameConstants.GAME_HEIGHT * scaleY));
-        g2d.setColor(new Color(255, 255, 255, 120));
-        g2d.drawRect(viewX, viewY, viewW, viewH);
         
+        synchronized (ctx.players) {
+            for (GamePanel.PlayerData pd : ctx.players.values()) {
+                // 같은 팀만 표시
+                if (pd.team == ctx.team) {
+                    // 팀원의 카메라 위치 계산 (캐릭터를 화면 중앙에 놓는다고 가정)
+                    int teammateCameraX = pd.x - GameConstants.GAME_WIDTH / 2;
+                    int teammateCameraY = pd.y - GameConstants.GAME_HEIGHT / 2;
+                    
+                    int teammateViewX = minimapX + Math.round(teammateCameraX * scaleX);
+                    int teammateViewY = minimapY + Math.round(teammateCameraY * scaleY);
+                    
+                    // 팀원 시야 범위 (연한 팀 색상 박스) - 일반 크기
+                    if (pd.team == GameConstants.TEAM_BLUE) {
+                        g2d.setColor(new Color(100, 150, 255, 30)); // 연한 파란색
+                        g2d.drawRect(teammateViewX, teammateViewY, viewW, viewH);
+                    } else if (pd.team == GameConstants.TEAM_RED) {
+                        g2d.setColor(new Color(255, 100, 100, 30)); // 연한 빨간색
+                        g2d.drawRect(teammateViewX, teammateViewY, viewW, viewH);
+                    }
+                }
+            }
+        }
+        
+        // 내 시야 범위 (더 진하게) - Mark 스킬 활성화 시 Piper만 확장
+        boolean myMarkActive = (ctx.piperMarkRemaining > 0f);
+        int myViewW = viewW;
+        int myViewH = viewH;
+        int myOffsetX = 0;
+        int myOffsetY = 0;
+        
+        if (myMarkActive) {
+            myViewW = Math.round(viewW * PIPER_MARK_RANGE_FACTOR);
+            myViewH = Math.round(viewH * PIPER_MARK_RANGE_FACTOR);
+            myOffsetX = Math.round((myViewW - viewW) / 2);
+            myOffsetY = Math.round((myViewH - viewH) / 2);
+        }
+        
+        int viewX = minimapX + Math.round(ctx.cameraX * scaleX) - myOffsetX;
+        int viewY = minimapY + Math.round(ctx.cameraY * scaleY) - myOffsetY;
+        g2d.setColor(new Color(255, 255, 255, 120));
+        g2d.drawRect(viewX, viewY, myViewW, myViewH);
+        
+        // 내 캐릭터 아이콘
         int myMinimapX = minimapX + (int) (ctx.playerX * scaleX);
         int myMinimapY = minimapY + (int) (ctx.playerY * scaleY);
-        
         g2d.setColor(Color.YELLOW);
         g2d.fillOval(myMinimapX - 4, myMinimapY - 4, 8, 8);
         g2d.setColor(Color.ORANGE);
         g2d.drawOval(myMinimapX - 5, myMinimapY - 5, 10, 10);
         
-        int visionRadius = (int) (VISION_RANGE * ((scaleX + scaleY) * 0.5f));
-        g2d.setColor(new Color(255, 255, 255, 30));
-        g2d.fillOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
-        g2d.setColor(new Color(255, 255, 255, 80));
-        g2d.drawOval(myMinimapX - visionRadius, myMinimapY - visionRadius,
-                visionRadius * 2, visionRadius * 2);
+        // Mark 스킬로 확장된 시야 범위 계산
+        int myExtendedRadius = (int) (VISION_RANGE * (myMarkActive ? PIPER_MARK_RANGE_FACTOR : 1f));
         
-        boolean thermalActive = (ctx.piperThermalRemaining > 0f || ctx.teamThermalRemaining > 0f);
-        boolean markActive = !thermalActive && (ctx.piperMarkRemaining > 0f || ctx.teamMarkRemaining > 0f);
-        int extendedRadius = (int) (VISION_RANGE * (markActive ? PIPER_MARK_RANGE_FACTOR : 1f));
+        // 팀 전체 Thermal 효과 (팀원이 Thermal 사용 시)
+        boolean teamThermalActive = (ctx.teamThermalRemaining > 0f);
         
         synchronized (ctx.players) {
             for (GamePanel.PlayerData pd : ctx.players.values()) {
@@ -430,22 +504,70 @@ public class GameRenderer {
                         pd.y >= ctx.cameraY && pd.y <= ctx.cameraY + ctx.canvasHeight);
                 
                 boolean shouldShow = false;
-                if (thermalActive) {
+                
+                // 내 시야에 보이는지 체크
+                if (myMarkActive && distance <= myExtendedRadius) {
                     shouldShow = true;
-                } else if (markActive && distance <= extendedRadius) {
+                } else if (!myMarkActive && distance <= VISION_RANGE && inViewport) {
                     shouldShow = true;
-                } else if (!markActive && !thermalActive && distance <= VISION_RANGE && inViewport) {
-                    shouldShow = true;
+                }
+                
+                // 팀원의 시야에 보이는지 체크 (같은 팀의 적만)
+                if (!shouldShow && pd.team != ctx.team) {
+                    // 팀 Thermal 활성화 시 모든 적 표시
+                    if (teamThermalActive) {
+                        shouldShow = true;
+                    } else {
+                        // 팀원의 일반 시야 체크
+                        synchronized (ctx.players) {
+                            for (GamePanel.PlayerData teammate : ctx.players.values()) {
+                                // 같은 팀원만 체크
+                                if (teammate.team == ctx.team) {
+                                    // 팀원의 카메라 위치 계산
+                                    int teammateCameraX = teammate.x - GameConstants.GAME_WIDTH / 2;
+                                    int teammateCameraY = teammate.y - GameConstants.GAME_HEIGHT / 2;
+                                    
+                                    // 팀원의 뷰포트 안에 있는지 체크 (일반 크기)
+                                    boolean inTeammateViewport = (pd.x >= teammateCameraX && 
+                                            pd.x <= teammateCameraX + GameConstants.GAME_WIDTH &&
+                                            pd.y >= teammateCameraY && 
+                                            pd.y <= teammateCameraY + GameConstants.GAME_HEIGHT);
+                                    
+                                    if (inTeammateViewport) {
+                                        int tdx = pd.x - teammate.x;
+                                        int tdy = pd.y - teammate.y;
+                                        double teamDistance = Math.sqrt(tdx * tdx + tdy * tdy);
+                                        
+                                        // 팀원의 시야 범위 내에 있으면 표시 (일반 범위)
+                                        if (teamDistance <= VISION_RANGE) {
+                                            shouldShow = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if (shouldShow) {
                     int otherX = minimapX + (int) (pd.x * scaleX);
                     int otherY = minimapY + (int) (pd.y * scaleY);
-                    if (thermalActive) {
-                        g2d.setColor(new Color(255, 180, 0));
+                    
+                    // Thermal 효과로 보이는 적 (파란 점으로 크게 표시)
+                    if (teamThermalActive && pd.team != ctx.team) {
+                        // 적 팀은 팀 색상으로 표시
+                        if (pd.team == GameConstants.TEAM_BLUE) {
+                            g2d.setColor(new Color(100, 150, 255)); // 파란색
+                        } else if (pd.team == GameConstants.TEAM_RED) {
+                            g2d.setColor(new Color(255, 100, 100)); // 빨간색
+                        } else {
+                            g2d.setColor(Color.YELLOW);
+                        }
                         g2d.fillOval(otherX - PIPER_THERMAL_DOT_SIZE / 2, otherY - PIPER_THERMAL_DOT_SIZE / 2,
                                 PIPER_THERMAL_DOT_SIZE, PIPER_THERMAL_DOT_SIZE);
                     } else {
+                        // 일반 시야로 보이는 플레이어 (작은 점)
                         if (pd.team == GameConstants.TEAM_BLUE) {
                             g2d.setColor(Color.BLUE);
                         } else if (pd.team == GameConstants.TEAM_RED) {
@@ -486,10 +608,10 @@ public class GameRenderer {
     }
     
     private void drawHUD(Graphics2D g, RenderContext ctx) {
-        g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(10, 10, 250, 200);
+        g.setColor(new Color(0, 0, 0, 180));
+        g.fillRect(10, 10, 220, 170);
         
-        g.setFont(new Font("맑은 고딕", Font.BOLD, 14));
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 13));
         g.setColor(Color.WHITE);
         
         int yPos = 30;
@@ -508,7 +630,7 @@ public class GameRenderer {
         g.drawString("Kills: " + ctx.kills + " / Deaths: " + ctx.deaths, 20, yPos);
         yPos += 20;
         
-        g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
+        g.setFont(new Font("맑은 고딕", Font.PLAIN, 11));
         g.setColor(new Color(255, 200, 200));
         g.drawString("최대HP: " + (int) ctx.currentCharacterData.health, 20, yPos);
         yPos += 18;
@@ -534,7 +656,7 @@ public class GameRenderer {
         int hudWidth = 400;
         int hudHeight = 80;
         int hudX = (ctx.canvasWidth - hudWidth) / 2;
-        int hudY = ctx.canvasHeight - hudHeight - 70;
+        int hudY = ctx.canvasHeight - hudHeight - 40;
         
         g.setColor(new Color(0, 0, 0, 180));
         g.fillRoundRect(hudX, hudY, hudWidth, hudHeight, 10, 10);
@@ -703,6 +825,402 @@ public class GameRenderer {
         }
     }
     
+    private void drawTeamStatus(Graphics2D g, RenderContext ctx) {
+        // 상단 중앙 스코어 박스 기준점
+        int centerX = ctx.canvasWidth / 2;
+        int scoreBoxWidth = 200;
+        int scoreBoxHeight = 40;
+        int scoreBoxX = centerX - scoreBoxWidth / 2;
+        
+        // 플레이어들을 팀별로 분류
+        java.util.List<Map.Entry<String, GamePanel.PlayerData>> redTeam = new ArrayList<>();
+        java.util.List<Map.Entry<String, GamePanel.PlayerData>> blueTeam = new ArrayList<>();
+        
+        if (ctx.players != null) {
+            for (Map.Entry<String, GamePanel.PlayerData> entry : ctx.players.entrySet()) {
+                if (entry.getValue().team == GameConstants.TEAM_RED) {
+                    redTeam.add(entry);
+                } else {
+                    blueTeam.add(entry);
+                }
+            }
+        }
+        
+        // 내 정보도 추가
+        if (ctx.team == GameConstants.TEAM_RED) {
+            redTeam.add(null); // 자신
+        } else {
+            blueTeam.add(null); // 자신
+        }
+        
+        int boxSize = scoreBoxHeight;
+        int gap = 5;
+        
+        // RED 팀 (왼쪽)
+        int redStartX = scoreBoxX - (redTeam.size() * (boxSize + gap));
+        for (int i = 0; i < redTeam.size(); i++) {
+            Map.Entry<String, GamePanel.PlayerData> entry = redTeam.get(i);
+            int x = redStartX + i * (boxSize + gap);
+            int y = 5;
+            
+            // 배경
+            g.setColor(new Color(139, 0, 0, 180));
+            g.fillRect(x, y, boxSize, boxSize);
+            g.setColor(new Color(255, 0, 0));
+            g.setStroke(new BasicStroke(2));
+            g.drawRect(x, y, boxSize, boxSize);
+            
+            if (entry == null) {
+                // 자신
+                boolean isDead = ctx.myHP <= 0;
+                
+                if (isDead) {
+                    // 사망 상태 표시 (X 표시와 어두운 배경)
+                    g.setColor(new Color(60, 0, 0, 220));
+                    g.fillRect(x, y, boxSize, boxSize);
+                    g.setColor(new Color(255, 0, 0));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawLine(x + 5, y + 5, x + boxSize - 5, y + boxSize - 5);
+                    g.drawLine(x + boxSize - 5, y + 5, x + 5, y + boxSize - 5);
+                } else {
+                    drawCharacterIcon(g, ctx.selectedCharacter, x + 2, y + 2, boxSize - 4);
+                    // HP 바
+                    int hpBarHeight = 4;
+                    int hpBarY = y + boxSize - hpBarHeight - 2;
+                    float hpPercent = (float) ctx.myHP / ctx.myMaxHP;
+                    g.setColor(new Color(0, 0, 0, 200));
+                    g.fillRect(x + 2, hpBarY, boxSize - 4, hpBarHeight);
+                    g.setColor(Color.GREEN);
+                    g.fillRect(x + 2, hpBarY, (int)((boxSize - 4) * hpPercent), hpBarHeight);
+                }
+            } else {
+                GamePanel.PlayerData player = entry.getValue();
+                boolean isDead = player.hp <= 0;
+                
+                if (isDead) {
+                    // 사망 상태 표시
+                    g.setColor(new Color(60, 0, 0, 220));
+                    g.fillRect(x, y, boxSize, boxSize);
+                    g.setColor(new Color(255, 0, 0));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawLine(x + 5, y + 5, x + boxSize - 5, y + boxSize - 5);
+                    g.drawLine(x + boxSize - 5, y + 5, x + 5, y + boxSize - 5);
+                } else {
+                    drawCharacterIcon(g, player.characterId, x + 2, y + 2, boxSize - 4);
+                    // HP 바
+                    int hpBarHeight = 4;
+                    int hpBarY = y + boxSize - hpBarHeight - 2;
+                    float hpPercent = (float) player.hp / player.maxHp;
+                    g.setColor(new Color(0, 0, 0, 200));
+                    g.fillRect(x + 2, hpBarY, boxSize - 4, hpBarHeight);
+                    g.setColor(Color.GREEN);
+                    g.fillRect(x + 2, hpBarY, (int)((boxSize - 4) * hpPercent), hpBarHeight);
+                }
+            }
+        }
+        
+        // BLUE 팀 (오른쪽)
+        int blueStartX = scoreBoxX + scoreBoxWidth + gap;
+        for (int i = 0; i < blueTeam.size(); i++) {
+            Map.Entry<String, GamePanel.PlayerData> entry = blueTeam.get(i);
+            int x = blueStartX + i * (boxSize + gap);
+            int y = 5;
+            
+            // 배경
+            g.setColor(new Color(0, 0, 139, 180));
+            g.fillRect(x, y, boxSize, boxSize);
+            g.setColor(new Color(0, 150, 255));
+            g.setStroke(new BasicStroke(2));
+            g.drawRect(x, y, boxSize, boxSize);
+            
+            // 캐릭터 아이콘만 (상대팀은 HP 안 보임)
+            if (entry == null) {
+                // 자신
+                boolean isDead = ctx.myHP <= 0;
+                
+                if (isDead) {
+                    // 사망 상태 표시
+                    g.setColor(new Color(0, 0, 60, 220));
+                    g.fillRect(x, y, boxSize, boxSize);
+                    g.setColor(new Color(100, 150, 255));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawLine(x + 5, y + 5, x + boxSize - 5, y + boxSize - 5);
+                    g.drawLine(x + boxSize - 5, y + 5, x + 5, y + boxSize - 5);
+                } else {
+                    drawCharacterIcon(g, ctx.selectedCharacter, x + 2, y + 2, boxSize - 4);
+                    // HP 바
+                    int hpBarHeight = 4;
+                    int hpBarY = y + boxSize - hpBarHeight - 2;
+                    float hpPercent = (float) ctx.myHP / ctx.myMaxHP;
+                    g.setColor(new Color(0, 0, 0, 200));
+                    g.fillRect(x + 2, hpBarY, boxSize - 4, hpBarHeight);
+                    g.setColor(Color.GREEN);
+                    g.fillRect(x + 2, hpBarY, (int)((boxSize - 4) * hpPercent), hpBarHeight);
+                }
+            } else {
+                GamePanel.PlayerData player = entry.getValue();
+                boolean isDead = player.hp <= 0;
+                
+                if (isDead) {
+                    // 사망 상태 표시
+                    g.setColor(new Color(0, 0, 60, 220));
+                    g.fillRect(x, y, boxSize, boxSize);
+                    g.setColor(new Color(100, 150, 255));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawLine(x + 5, y + 5, x + boxSize - 5, y + boxSize - 5);
+                    g.drawLine(x + boxSize - 5, y + 5, x + 5, y + boxSize - 5);
+                } else {
+                    drawCharacterIcon(g, player.characterId, x + 2, y + 2, boxSize - 4);
+                    // HP 바
+                    int hpBarHeight = 4;
+                    int hpBarY = y + boxSize - hpBarHeight - 2;
+                    float hpPercent = (float) player.hp / player.maxHp;
+                    g.setColor(new Color(0, 0, 0, 200));
+                    g.fillRect(x + 2, hpBarY, boxSize - 4, hpBarHeight);
+                    g.setColor(Color.GREEN);
+                    g.fillRect(x + 2, hpBarY, (int)((boxSize - 4) * hpPercent), hpBarHeight);
+                }
+            }
+        }
+    }
+    
+    private void drawCharacterIcon(Graphics2D g, String characterId, int x, int y, int size) {
+        // 캐릭터별 색상으로 간단한 아이콘 표시
+        if (characterId == null) return;
+        
+        Color iconColor = switch (characterId.toLowerCase()) {
+            case "raven" -> new Color(120, 80, 160);
+            case "piper" -> new Color(255, 140, 0);
+            case "technician" -> new Color(70, 180, 70);
+            case "general" -> new Color(180, 150, 50);
+            default -> Color.GRAY;
+        };
+        
+        g.setColor(iconColor);
+        g.fillOval(x + 2, y + 2, size - 4, size - 4);
+        
+        // 캐릭터 이니셜
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("맑은 고딕", Font.BOLD, size / 2));
+        String initial = characterId.substring(0, 1).toUpperCase();
+        FontMetrics fm = g.getFontMetrics();
+        int textX = x + (size - fm.stringWidth(initial)) / 2;
+        int textY = y + (size + fm.getAscent()) / 2 - 2;
+        g.drawString(initial, textX, textY);
+    }
+    
+    private void drawScoreboard(Graphics2D g, RenderContext ctx) {
+        // 반투명 오버레이
+        g.setColor(new Color(0, 0, 0, 200));
+        g.fillRect(0, 0, ctx.canvasWidth, ctx.canvasHeight);
+        
+        int boardWidth = 800;
+        int boardHeight = 500;
+        int boardX = (ctx.canvasWidth - boardWidth) / 2;
+        int boardY = (ctx.canvasHeight - boardHeight) / 2;
+        
+        // 스코어보드 배경
+        g.setColor(new Color(40, 40, 40, 240));
+        g.fillRoundRect(boardX, boardY, boardWidth, boardHeight, 15, 15);
+        g.setColor(new Color(255, 255, 255, 100));
+        g.setStroke(new BasicStroke(3));
+        g.drawRoundRect(boardX, boardY, boardWidth, boardHeight, 15, 15);
+        
+        // 타이틀
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 32));
+        g.setColor(Color.WHITE);
+        String title = "SCOREBOARD";
+        FontMetrics fm = g.getFontMetrics();
+        int titleX = boardX + (boardWidth - fm.stringWidth(title)) / 2;
+        g.drawString(title, titleX, boardY + 50);
+        
+        // 라운드 스코어
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 24));
+        String score = "RED " + ctx.redWins + " : " + ctx.blueWins + " BLUE";
+        int scoreX = boardX + (boardWidth - g.getFontMetrics().stringWidth(score)) / 2;
+        g.drawString(score, scoreX, boardY + 90);
+        
+        // 플레이어들을 팀별로 분류
+        java.util.List<PlayerInfo> redTeam = new ArrayList<>();
+        java.util.List<PlayerInfo> blueTeam = new ArrayList<>();
+        
+        if (ctx.players != null) {
+            for (Map.Entry<String, GamePanel.PlayerData> entry : ctx.players.entrySet()) {
+                GamePanel.PlayerData p = entry.getValue();
+                PlayerInfo info = new PlayerInfo();
+                info.name = entry.getKey();
+                info.characterId = p.characterId;
+                info.kills = p.kills;
+                info.deaths = p.deaths;
+                info.team = p.team;
+                
+                if (p.team == GameConstants.TEAM_RED) {
+                    redTeam.add(info);
+                } else {
+                    blueTeam.add(info);
+                }
+            }
+        }
+        
+        // 내 정보도 추가
+        PlayerInfo myInfo = new PlayerInfo();
+        myInfo.name = ctx.playerName;
+        myInfo.characterId = ctx.selectedCharacter;
+        myInfo.kills = ctx.kills;
+        myInfo.deaths = ctx.deaths;
+        myInfo.team = ctx.team;
+        
+        if (ctx.team == GameConstants.TEAM_RED) {
+            redTeam.add(myInfo);
+        } else {
+            blueTeam.add(myInfo);
+        }
+        
+        // 정렬 (K/D 비율 순)
+        java.util.Comparator<PlayerInfo> kdComparator = (a, b) -> {
+            float kdA = a.deaths == 0 ? a.kills : (float)a.kills / a.deaths;
+            float kdB = b.deaths == 0 ? b.kills : (float)b.kills / b.deaths;
+            return Float.compare(kdB, kdA);
+        };
+        redTeam.sort(kdComparator);
+        blueTeam.sort(kdComparator);
+        
+        // 헤더
+        int headerY = boardY + 130;
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 16));
+        g.setColor(new Color(200, 200, 200));
+        g.drawString("NAME", boardX + 60, headerY);
+        g.drawString("CHARACTER", boardX + 250, headerY);
+        g.drawString("ULT", boardX + 420, headerY);
+        g.drawString("K", boardX + 520, headerY);
+        g.drawString("D", boardX + 600, headerY);
+        g.drawString("K/D", boardX + 680, headerY);
+        
+        // RED 팀
+        int yPos = headerY + 40;
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+        g.setColor(new Color(255, 100, 100));
+        g.drawString("RED TEAM", boardX + 20, yPos);
+        yPos += 30;
+        
+        g.setFont(new Font("맑은 고딕", Font.PLAIN, 14));
+        for (PlayerInfo info : redTeam) {
+            boolean isMe = info.name.equals(ctx.playerName);
+            if (isMe) {
+                g.setColor(new Color(255, 255, 0, 100));
+                g.fillRect(boardX + 10, yPos - 18, boardWidth - 20, 25);
+            }
+            
+            // 캐릭터 아이콘
+            drawCharacterIcon(g, info.characterId, boardX + 20, yPos - 16, 20);
+            
+            g.setColor(Color.WHITE);
+            g.drawString(info.name, boardX + 60, yPos);
+            g.drawString(getCharacterName(info.characterId), boardX + 250, yPos);
+            
+            // 궁극기 상태 (간단히 ON/OFF)
+            String ultStatus = getUltStatus(info, ctx);
+            if ("READY".equals(ultStatus)) {
+                g.setColor(new Color(0, 255, 0));
+            } else {
+                g.setColor(new Color(150, 150, 150));
+            }
+            g.drawString(ultStatus, boardX + 420, yPos);
+            
+            g.setColor(Color.WHITE);
+            g.drawString(String.valueOf(info.kills), boardX + 520, yPos);
+            g.drawString(String.valueOf(info.deaths), boardX + 600, yPos);
+            float kd = info.deaths == 0 ? info.kills : (float)info.kills / info.deaths;
+            g.drawString(String.format("%.2f", kd), boardX + 680, yPos);
+            
+            yPos += 30;
+        }
+        
+        // BLUE 팀
+        yPos += 20;
+        g.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+        g.setColor(new Color(100, 150, 255));
+        g.drawString("BLUE TEAM", boardX + 20, yPos);
+        yPos += 30;
+        
+        g.setFont(new Font("맑은 고딕", Font.PLAIN, 14));
+        for (PlayerInfo info : blueTeam) {
+            boolean isMe = info.name.equals(ctx.playerName);
+            if (isMe) {
+                g.setColor(new Color(255, 255, 0, 100));
+                g.fillRect(boardX + 10, yPos - 18, boardWidth - 20, 25);
+            }
+            
+            // 캐릭터 아이콘
+            drawCharacterIcon(g, info.characterId, boardX + 20, yPos - 16, 20);
+            
+            g.setColor(Color.WHITE);
+            g.drawString(info.name, boardX + 60, yPos);
+            g.drawString(getCharacterName(info.characterId), boardX + 250, yPos);
+            
+            // 궁극기 상태
+            String ultStatus = getUltStatus(info, ctx);
+            if ("READY".equals(ultStatus)) {
+                g.setColor(new Color(0, 255, 0));
+            } else {
+                g.setColor(new Color(150, 150, 150));
+            }
+            g.drawString(ultStatus, boardX + 420, yPos);
+            
+            g.setColor(Color.WHITE);
+            g.drawString(String.valueOf(info.kills), boardX + 520, yPos);
+            g.drawString(String.valueOf(info.deaths), boardX + 600, yPos);
+            float kd = info.deaths == 0 ? info.kills : (float)info.kills / info.deaths;
+            g.drawString(String.format("%.2f", kd), boardX + 680, yPos);
+            
+            yPos += 30;
+        }
+        
+        // 하단 안내
+        g.setFont(new Font("맑은 고딕", Font.PLAIN, 12));
+        g.setColor(new Color(200, 200, 200));
+        String hint = "TAB 키를 떼면 닫힙니다";
+        int hintX = boardX + (boardWidth - g.getFontMetrics().stringWidth(hint)) / 2;
+        g.drawString(hint, hintX, boardY + boardHeight - 20);
+    }
+    
+    private String getCharacterName(String characterId) {
+        if (characterId == null) return "Unknown";
+        return switch (characterId.toLowerCase()) {
+            case "raven" -> "Raven";
+            case "piper" -> "Piper";
+            case "technician" -> "Technician";
+            case "general" -> "General";
+            default -> characterId;
+        };
+    }
+    
+    private String getUltStatus(PlayerInfo info, RenderContext ctx) {
+        // 같은 팀만 궁극기 상태 표시
+        if (info.team != ctx.team) {
+            return "-";
+        }
+        
+        // 자기 자신이면 실제 쿨타임 체크
+        if (info.name.equals(ctx.playerName)) {
+            if (ctx.abilities != null && ctx.abilities.length > 2) {
+                Ability ult = ctx.abilities[2];
+                return ult.canUse() ? "READY" : String.format("%.1fs", ult.getCurrentCooldown());
+            }
+        }
+        
+        // 다른 팀원은 간단히 표시 (실제 쿨타임 정보는 서버에서 동기화 필요)
+        return "READY";
+    }
+    
+    private static class PlayerInfo {
+        String name;
+        String characterId;
+        int kills;
+        int deaths;
+        int team;
+    }
+    
     private boolean isOnScreen(int screenX, int screenY, RenderContext ctx) {
         return screenX >= -100 && screenX <= ctx.canvasWidth + 100 &&
                screenY >= -100 && screenY <= ctx.canvasHeight + 100;
@@ -750,6 +1268,7 @@ public class GameRenderer {
         // UI 상태
         public boolean showMinimap;
         public boolean editMode;
+        public boolean showScoreboard;
         public int kills;
         public int deaths;
         public Ability[] abilities;

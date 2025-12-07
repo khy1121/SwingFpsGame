@@ -15,7 +15,7 @@ import javax.swing.*;
 /**
  * 게임 패널 - 기존 디자인 유지하면서 간단한 로직
  * 예제 코드처럼 단순한 게임 화면
- * 
+ *
  * 리팩토링: GameState, NetworkClient, GameRenderer 사용하여 책임 분리
  * Phase 2: MapManager, SkillManager, UIManager, GameLogicController 추가
  */
@@ -104,6 +104,10 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 다른 플레이어들
     final Map<String, PlayerData> players = new HashMap<>();
+    
+    // 중복 피격 방지용 (슈터 이름 -> 마지막 피격 시간)
+    private final Map<Integer, Long> lastHitTime = new HashMap<>(); // 미사일 ID로 변경
+    private static final long HIT_COOLDOWN_MS = 200; // 200ms 이내 동일 슈터로부터 피격 무시
 
     // 미사일 리스트 (objectManager에서 관리)
     List<GameObjectManager.Missile> missiles;
@@ -125,6 +129,9 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 미니맵 표시 여부
     boolean showMinimap = true;
+    
+    // 게임 오버 플래그 (게임 종료 후 액션 차단용)
+    private boolean gameOver = false;
 
     // 맵 시스템
     private java.awt.image.BufferedImage mapImage; // 맵 배경 이미지
@@ -178,6 +185,9 @@ public class GamePanel extends JFrame implements KeyListener {
 
     // 버프 상태 (gen_aura 등)
     float moveSpeedMultiplier = 1.0f;
+    
+    // TAB 스코어보드 표시 상태
+    private boolean showScoreboard = false;
 
     // 라운드 시스템
     public enum RoundState {
@@ -240,6 +250,9 @@ public class GamePanel extends JFrame implements KeyListener {
             setBackground(new Color(20, 25, 35));
             setFocusable(true);
             addKeyListener(GamePanel.this);
+            
+            // TAB 키가 포커스 이동에 사용되지 않도록 설정
+            setFocusTraversalKeysEnabled(false);
 
             // 스프라이트 로드
             GamePanel.this.loadSprites();
@@ -248,6 +261,11 @@ public class GamePanel extends JFrame implements KeyListener {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    // 게임 종료 상태면 입력 무시
+                    if (gameOver) {
+                        return;
+                    }
+                    
                     // 원시 좌표 저장
                     rawMouseX = e.getX();
                     rawMouseY = e.getY();
@@ -291,8 +309,11 @@ public class GamePanel extends JFrame implements KeyListener {
                         startPaintAt(mapX, mapY);
                         return;
                     }
-                    // 게임 모드: 좌클릭 공격
+                    // 게임 모드: 좌클릭 공격 (사망 시 불가)
                     if (e.getButton() == MouseEvent.BUTTON1) {
+                        if (gameState.getMyHP() <= 0) {
+                            return; // 사망 시 공격 불가
+                        }
                         int targetMapX = scaledMouseX + cameraX;
                         int targetMapY = scaledMouseY + cameraY;
                         useBasicAttack(targetMapX, targetMapY);
@@ -399,6 +420,7 @@ public class GamePanel extends JFrame implements KeyListener {
         // UI 상태
         ctx.showMinimap = this.showMinimap;
         ctx.editMode = this.editMode;
+        ctx.showScoreboard = this.showScoreboard;
         ctx.kills = gameState.getKills();
         ctx.deaths = gameState.getDeaths();
         ctx.abilities = this.abilities;
@@ -1383,6 +1405,13 @@ public class GamePanel extends JFrame implements KeyListener {
      * Raven 전용 런타임 처리: 대쉬 이동, 과충전 만료 처리
      */
     private void updateRavenRuntime() {
+        // 사망 시 런타임 처리 중지
+        if (gameState.getMyHP() <= 0) {
+            ravenDashRemaining = 0f;
+            ravenOverchargeRemaining = 0f;
+            return;
+        }
+
         // 대쉬: 남은 시간 동안 추가 이동 (입력 방향 기준, 없으면 위쪽)
         if (ravenDashRemaining > 0f) {
             ravenDashRemaining -= 0.016f;
@@ -1466,6 +1495,16 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void updatePlayerPosition() {
+        // 게임 종료 시 이동 불가
+        if (gameOver) {
+            return;
+        }
+        
+        // 사망 시 이동 불가
+        if (gameState.getMyHP() <= 0) {
+            return;
+        }
+        
         int oldX = playerX;
         int oldY = playerY;
 
@@ -1570,7 +1609,7 @@ public class GamePanel extends JFrame implements KeyListener {
                 for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
                     PlayerData p = entry.getValue();
                     if (p.team != team) {
-                        if (collisionManager.checkMissilePlayerCollision(m.x, m.y, p.x, p.y)) {
+                        if (collisionManager.checkMissilePlayerCollision((int)m.x, (int)m.y, p.x, p.y)) {
                             it.remove();
                             hit = true;
                             // 서버에 적 플레이어 피격 보고
@@ -1587,7 +1626,7 @@ public class GamePanel extends JFrame implements KeyListener {
                     for (Map.Entry<Integer, GameObjectManager.PlacedObjectClient> entry : placedObjects.entrySet()) {
                         GameObjectManager.PlacedObjectClient obj = entry.getValue();
                         if (obj.team != team && obj.hp > 0) {
-                            if (collisionManager.checkMissileObjectCollision(m.x, m.y, obj.x, obj.y)) {
+                            if (collisionManager.checkMissileObjectCollision((int)m.x, (int)m.y, obj.x, obj.y)) {
                                 it.remove();
                                 // 서버에 오브젝트 피격 보고
                                 networkClient.sendHitReport("HIT_OBJ:" + obj.id);
@@ -1619,6 +1658,16 @@ public class GamePanel extends JFrame implements KeyListener {
                                 continue; // 자기 터렛 미사일은 무시
                             }
                         }
+                        
+                        // 중복 피격 방지: 동일 미사일로부터의 중복 피격 무시
+                        long now = System.currentTimeMillis();
+                        Long lastHit = lastHitTime.get(m.id);
+                        if (lastHit != null && now - lastHit < HIT_COOLDOWN_MS) {
+                            System.out.println("[HIT_COOLDOWN] Ignored duplicate hit from missile #" + m.id);
+                            continue;
+                        }
+                        lastHitTime.put(m.id, now);
+                        
                         networkClient.sendHitReport("HITME:" + ownerInfo);
                     } else {
                         networkClient.sendHitReport("DEATH");
@@ -1663,23 +1712,35 @@ public class GamePanel extends JFrame implements KeyListener {
     }
 
     private void shootMissile(int targetX, int targetY) {
+        // 게임 오버 시 또는 사망 시 발사 불가
+        if (gameOver || gameState.getMyHP() <= 0) {
+            return;
+        }
+        
         // 플레이어 위치에서 마우스 방향으로 발사
-        int speed = (int) (GameConstants.MISSILE_SPEED * missileSpeedMultiplier);
-        int sx = playerX;
-        int sy = playerY;
-        int tx = targetX;
-        int ty = targetY;
-        int vx = tx - sx;
-        int vy = ty - sy;
+        float speed = GameConstants.MISSILE_SPEED * missileSpeedMultiplier;
+        float sx = playerX;
+        float sy = playerY;
+        float tx = targetX;
+        float ty = targetY;
+        float vx = tx - sx;
+        float vy = ty - sy;
         if (vx == 0 && vy == 0) {
             vy = -1;
         }
         double len = Math.sqrt(vx * vx + vy * vy);
         double nx = (len > 0) ? (vx / len) : 0.0;
         double ny = (len > 0) ? (vy / len) : -1.0;
-        int dx = (int) Math.round(nx * speed);
-        int dy = (int) Math.round(ny * speed);
-        GameObjectManager.Missile missile = new GameObjectManager.Missile(sx, sy, dx, dy, team, playerName);
+        float dx = (float)(nx * speed);  // 정밀한 float 값 유지
+        float dy = (float)(ny * speed);  // 정밀한 float 값 유지
+        
+        // 기본 공격의 사거리 가져오기
+        float maxRange = 0f;
+        if (abilities != null && abilities.length > 0) {
+            maxRange = abilities[0].range;
+        }
+        
+        GameObjectManager.Missile missile = new GameObjectManager.Missile(sx, sy, dx, dy, team, playerName, maxRange);
         objectManager.addMissile(missile);
 
         if (out != null) {
@@ -1705,6 +1766,7 @@ public class GamePanel extends JFrame implements KeyListener {
      */
     void returnToLobby() {
         // 게임 종료
+        gameOver = true; // 플래그 설정
         if (timer != null) {
             timer.stop();
         }
@@ -1742,6 +1804,16 @@ public class GamePanel extends JFrame implements KeyListener {
     public void keyPressed(KeyEvent e) {
         keys[e.getKeyCode()] = true;
         int keyCode = e.getKeyCode();
+
+        // 게임 종료 상태면 입력 무시
+        if (gameOver) {
+            return;
+        }
+
+        // 사망 상태면 F3, F4, TAB 외 입력 무시
+        if (gameState.getMyHP() <= 0 && keyCode != KeyEvent.VK_F3 && keyCode != KeyEvent.VK_F4 && keyCode != KeyEvent.VK_TAB) {
+            return;
+        }
 
         // 편집 모드 저장 단축키 (Ctrl+S)
         if (editMode && keyCode == KeyEvent.VK_S && (e.isControlDown() || e.isMetaDown())) {
@@ -1810,6 +1882,7 @@ public class GamePanel extends JFrame implements KeyListener {
             case KeyEvent.VK_F5 -> { // 수동 저장 키
                 saveEditedMap();
             }
+            case KeyEvent.VK_TAB -> showScoreboard = true; // TAB 스코어보드 표시
             case KeyEvent.VK_T, KeyEvent.VK_ENTER -> chatInput.requestFocusInWindow(); // 채팅 포커스
         }
     }
@@ -2045,6 +2118,16 @@ public class GamePanel extends JFrame implements KeyListener {
      * targetX, targetY는 맵 좌표입니다.
      */
     private void useBasicAttack(int targetX, int targetY) {
+        // 게임 종료 시 공격 불가
+        if (gameOver) {
+            return;
+        }
+        
+        // 사망 시 공격 불가
+        if (gameState.getMyHP() <= 0) {
+            return;
+        }
+        
         if (abilities != null && abilities.length > 0) {
             Ability basicAttack = abilities[0];
             if (basicAttack.canUse()) {
@@ -2064,6 +2147,16 @@ public class GamePanel extends JFrame implements KeyListener {
      * 전술 스킬 사용 (E키)
      */
     private void useTacticalSkill() {
+        // 게임 종료 시 스킬 사용 불가
+        if (gameOver) {
+            return;
+        }
+        
+        // 사망 시 스킬 사용 불가
+        if (gameState.getMyHP() <= 0) {
+            return;
+        }
+        
         if (abilities != null && abilities.length > 1) {
             Ability tactical = abilities[1];
             if (tactical.canUse()) {
@@ -2091,6 +2184,16 @@ public class GamePanel extends JFrame implements KeyListener {
      * 궁극기 사용 (R키)
      */
     private void useUltimateSkill() {
+        // 게임 종료 시 궁극기 사용 불가
+        if (gameOver) {
+            return;
+        }
+        
+        // 사망 시 궁극기 사용 불가
+        if (gameState.getMyHP() <= 0) {
+            return;
+        }
+        
         if (abilities != null && abilities.length > 2) {
             Ability ultimate = abilities[2];
             if (ultimate.canUse()) {
@@ -2339,6 +2442,11 @@ public class GamePanel extends JFrame implements KeyListener {
     @Override
     public void keyReleased(KeyEvent e) {
         keys[e.getKeyCode()] = false;
+        
+        // TAB 키를 떼면 스코어보드 숨기기
+        if (e.getKeyCode() == KeyEvent.VK_TAB) {
+            showScoreboard = false;
+        }
     }
 
     @Override
@@ -2532,7 +2640,26 @@ public class GamePanel extends JFrame implements KeyListener {
             }
         }
     }
+    
+    // Public 메서드: 팀 스킬 상태 설정 (GameMessageHandler에서 사용)
+    public void setTeamMarkRemaining(float value) {
+        this.teamMarkRemaining = Math.max(this.teamMarkRemaining, value);
+    }
+    
+    public void setTeamThermalRemaining(float value) {
+        this.teamThermalRemaining = Math.max(this.teamThermalRemaining, value);
+    }
+    
+    // 게임 오버 플래그 설정
+    public void setGameOver(boolean value) {
+        this.gameOver = value;
+        if (value && timer != null) {
+            timer.stop(); // 게임 오버 시 타이머 즉시 중지
+        }
+    }
 
 }
+
+    
 
     

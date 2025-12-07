@@ -41,6 +41,7 @@ public class GameServer {
     private int blueWins = 0;
     private boolean roundEnded = false;
     private static final int MAX_WINS = 2; // 3판 2선승
+    private String selectedMap = null; // 현재 선택된 맵 (null = 아직 라운드 시작 전)
 
     // 캐릭터 선택 제한 (라운드당 1회, 라운드 시작 10초 이내)
     private long currentRoundStartTime = 0;
@@ -158,7 +159,7 @@ public class GameServer {
         }
     }
 
-    private void broadcast(String message, String excludeClient) {
+    private synchronized void broadcast(String message, String excludeClient) {
         for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
             if (!entry.getKey().equals(excludeClient)) {
                 entry.getValue().sendMessage(message);
@@ -167,7 +168,7 @@ public class GameServer {
     }
 
     // 팀/레디 상태 전체 브로드캐스트 (캐릭터 정보 포함)
-    private void broadcastTeamRoster() {
+    private synchronized void broadcastTeamRoster() {
         StringBuilder sb = new StringBuilder("TEAM_ROSTER:");
         boolean first = true;
         for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
@@ -189,7 +190,7 @@ public class GameServer {
     }
 
     // 간단한 스탯 브로드캐스트: 이름, kills, deaths, hp
-    private void broadcastStats(String name, Protocol.PlayerInfo info) {
+    private synchronized void broadcastStats(String name, Protocol.PlayerInfo info) {
         if (info == null)
             return;
         String charId = (info.characterId != null) ? info.characterId : "raven";
@@ -300,6 +301,15 @@ public class GameServer {
                     System.out.println("[JOIN_SUCCESS] " + playerName + " joined with " + joinCharId + " (HP: " + playerInfo.hp + ")");
                     clients.put(playerName, this);
                     sendMessage("WELCOME: 서버에 " + playerName + " 님이 연결되었습니다.");
+                    
+                    // 현재 맵 정보 전송 (라운드가 시작된 경우에만)
+                    if (selectedMap != null && !selectedMap.isEmpty() && roundCount > 0) {
+                        sendMessage("MAP_SYNC:" + selectedMap);
+                        System.out.println("[MAP_SYNC] Sent current map to " + playerName + ": " + selectedMap);
+                    } else {
+                        System.out.println("[MAP_SYNC] Skipped for " + playerName + " - waiting for first ROUND_START");
+                    }
+                    
                     broadcast("CHAT:" + playerName + " 님이 게임에 참가했습니다!", playerName);
                     // 기존 플레이어 스탯을 새 플레이어에게 전달
                     for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
@@ -602,26 +612,8 @@ public class GameServer {
                     break;
 
                 case "RESPAWN":
-                    String[] resp = data.split(",");
-                    if (resp.length >= 2) {
-                        playerInfo.x = Float.parseFloat(resp[0]);
-                        playerInfo.y = Float.parseFloat(resp[1]);
-                        // 캐릭터별 최대 HP로 부활
-                        if (playerInfo.characterId != null) {
-                            playerInfo.hp = (int) com.fpsgame.common.CharacterData
-                                    .getById(playerInfo.characterId).health;
-                        } else {
-                            playerInfo.hp = GameConstants.MAX_HP;
-                        }
-                        // 3초 스폰 보호 시작
-                        spawnProtectedUntil = System.currentTimeMillis() + 3000;
-                        broadcastStats(playerName, playerInfo);
-                        String charId = (playerInfo.characterId != null) ? playerInfo.characterId : "raven";
-                        String posUpdate = "PLAYER:" + playerName + "," + playerInfo.x + "," + playerInfo.y + ","
-                                + playerInfo.team + "," + playerInfo.hp + "," + charId;
-                        broadcast(posUpdate, playerName);
-                        broadcast("CHAT:" + playerName + " 님이 리스폰했습니다!", null);
-                    }
+                    // 라운드 중 부활 비활성화 - 라운드 시작 시에만 부활
+                    System.out.println("[RESPAWN] " + playerName + " 부활 요청 거부 (라운드 중)");
                     break;
 
                 case "QUIT":
@@ -630,12 +622,15 @@ public class GameServer {
             }
         }
 
-        public void sendMessage(String message) {
+        public synchronized void sendMessage(String message) {
             if (out != null) {
                 try {
                     out.writeUTF(message);
                     out.flush();
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    System.err.println("[SEND_ERROR] Failed to send message to " + playerName + ": " + e.getMessage());
+                    // 연결이 끊어진 경우 정리
+                    running = false;
                 }
             }
         }
@@ -743,7 +738,18 @@ public class GameServer {
 
             // 모든 스킬은 클라이언트에게 브로드캐스트 (시각 효과용)
             String skillMsg = "SKILL:" + user + "," + data;
-            broadcast(skillMsg, user);
+            
+            // Piper mark와 thermal은 같은 팀에게만 브로드캐스트
+            if (("piper_mark".equals(abilityId) || "piper_thermal".equals(abilityId)) && playerInfo != null) {
+                for (Map.Entry<String, ClientHandler> e : clients.entrySet()) {
+                    ClientHandler ch = e.getValue();
+                    if (ch.playerInfo != null && ch.playerInfo.team == playerInfo.team) {
+                        ch.sendMessage(skillMsg);
+                    }
+                }
+            } else {
+                broadcast(skillMsg, user);
+            }
         }
 
         /**
@@ -825,8 +831,9 @@ public class GameServer {
                         continue;
                     if (ch.playerInfo.team != aura.ownerTeam)
                         continue; // 같은 팀만
-                    if (ch.playerName.equals(aura.ownerName))
-                        continue; // 본인 제외 (선택사항)
+                    // 너프 원할 시 본인 버프 제외 조건 
+                    // if (ch.playerName.equals(aura.ownerName))
+                    //     continue;
 
                     int dx = (int) ch.playerInfo.x - aura.x;
                     int dy = (int) ch.playerInfo.y - aura.y;
@@ -1134,7 +1141,7 @@ public class GameServer {
 
         // 랜덤 맵 선택
         String[] availableMaps = { "map", "map2", "map3", "village" };
-        String selectedMap = availableMaps[new java.util.Random().nextInt(availableMaps.length)];
+        this.selectedMap = availableMaps[new java.util.Random().nextInt(availableMaps.length)];
 
         // 게임 상태 초기화
         placedObjects.clear();
