@@ -2655,6 +2655,10 @@ public class GamePanel extends JFrame implements KeyListener {
         this.gameOver = value;
         if (value && timer != null) {
             timer.stop(); // 게임 오버 시 타이머 즉시 중지
+            // 즉시 화면을 한 번 더 그려 중앙 메시지가 보이도록 강제 리페인트
+            if (canvas != null) {
+                javax.swing.SwingUtilities.invokeLater(() -> canvas.repaint());
+            }
         }
     }
 
